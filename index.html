@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChargeBay — EV Charging Simulator</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:'Segoe UI',system-ui,sans-serif;}
+  #app{position:fixed;inset:0;}
+  canvas{display:block;}
+  #hud{position:fixed;inset:0;pointer-events:none;color:#eaf6ff;text-shadow:0 1px 4px rgba(0,0,0,.8);}
+  #prompt{position:absolute;left:50%;top:58%;transform:translateX(-50%);font-size:17px;letter-spacing:.04em;
+    background:rgba(8,14,22,.55);border:1px solid rgba(120,220,255,.35);border-radius:8px;padding:8px 18px;backdrop-filter:blur(6px);opacity:0;transition:opacity .18s;}
+  #prompt.show{opacity:1}
+  #crosshair{position:absolute;left:50%;top:50%;width:14px;height:14px;transform:translate(-50%,-50%);opacity:.85}
+  #crosshair:before,#crosshair:after{content:"";position:absolute;background:#cfeaff66;}
+  #crosshair:before{left:6px;top:0;width:2px;height:14px}
+  #crosshair:after{top:6px;left:0;height:2px;width:14px}
+  #panel{position:absolute;left:18px;top:16px;background:rgba(8,14,22,.55);border:1px solid rgba(120,220,255,.25);
+    border-radius:10px;padding:12px 16px;backdrop-filter:blur(6px);min-width:210px;}
+  #panel h1{font-size:15px;margin:0 0 6px;letter-spacing:.14em;color:#8fe3ff;font-weight:600}
+  .row{display:flex;justify-content:space-between;font-size:13px;margin:3px 0;color:#cfe6f5;}
+  .row b{color:#fff;font-variant-numeric:tabular-nums}
+  .good{color:#69f0a0}.warn{color:#ffd166}.bad{color:#ff6b6b}
+  #toast{position:absolute;left:50%;top:22%;transform:translateX(-50%);font-size:20px;font-weight:600;
+    background:rgba(8,14,22,.6);border:1px solid rgba(105,240,160,.4);border-radius:10px;padding:10px 22px;opacity:0;transition:opacity .25s;}
+  #toast.show{opacity:1}
+  #start{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(2,6,12,.7);pointer-events:auto;backdrop-filter:blur(3px);}
+  #start h1{font-size:42px;letter-spacing:.2em;color:#8fe3ff;margin:0 0 8px;font-weight:700}
+  #start p{color:#bcd8ea;max-width:460px;text-align:center;line-height:1.5;margin:4px 0;}
+  #start button{margin-top:22px;font-size:18px;padding:12px 40px;border-radius:8px;border:1px solid #8fe3ff66;background:#0d2233;color:#dff4ff;cursor:pointer;letter-spacing:.1em;}
+  #start button:hover{background:#12344d}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="hud">
+  <div id="panel">
+    <h1>⚡ CHARGEBAY</h1>
+    <div class="row"><span>Time</span><b id="clock">18:42</b></div>
+    <div class="row"><span>Spot price</span><b id="price">12.4¢/kWh</b></div>
+    <div class="row"><span>Session revenue</span><b id="rev" class="good">$0.00</b></div>
+    <div class="row"><span>Customers served</span><b id="served">0</b></div>
+    <div class="row"><span>Grid load</span><b id="load">0 kW</b></div>
+    <div class="row"><span>Weather</span><b id="wx">Clear dusk</b></div>
+  </div>
+  <div id="prompt">Press <b>E</b></div>
+  <div id="crosshair"></div>
+  <div id="toast"></div>
+  <div id="start">
+    <h1>⚡ CHARGEBAY</h1>
+    <p>Dusk. Rain's coming. Pull up, grab the connector, and get these cars charged.</p>
+    <p style="font-size:13px;opacity:.8">WASD move · Mouse look · <b>E</b> interact · <b>R</b> start/stop charging · <b>Esc</b> release mouse</p>
+    <button id="playbtn">ENTER THE BAY</button>
+  </div>
+</div>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/": "./vendor/"
+}}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

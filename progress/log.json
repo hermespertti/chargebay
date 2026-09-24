@@ -1,0 +1,97 @@
+{
+ "rounds": 19,
+ "bar": "Forza Horizon-style photoreal dusk charging station frame, first-person view (user-selected, frozen)",
+ "pieces": [
+  {
+   "name": "Environment & sky",
+   "round": 18,
+   "verdict": "gap",
+   "gate": "vision score >=7 vs Forza dusk frame",
+   "gap": "sky believable but foreground lighting not integrated with it"
+  },
+  {
+   "name": "Wet ground / reflections",
+   "round": 19,
+   "verdict": "gap",
+   "gate": "vision score >=7; puddle/dry distinction visible",
+   "gap": "masked planar mirror too binary/dark; needs roughness-aware SSR + sky fresnel"
+  },
+  {
+   "name": "Hero car fidelity",
+   "round": 19,
+   "verdict": "gap",
+   "gate": "vision >=7 on car close-up",
+   "gap": "critic reports blob-like cars; verify display/scale/tone mapping of CarConcept in close beauty shot"
+  },
+  {
+   "name": "Interaction gameplay",
+   "round": 1,
+   "verdict": "win",
+   "gate": "first-person plug/dock/charge loop works headless",
+   "gap": ""
+  },
+  {
+   "name": "Stability",
+   "round": 19,
+   "verdict": "win",
+   "gate": "zero console errors + ready flag + >=30fps headless",
+   "gap": ""
+  }
+ ],
+ "history": [
+  {
+   "round": 1,
+   "piece": "Interaction gameplay",
+   "verdict": "win",
+   "metrics": {
+    "console_errors": 0
+   },
+   "note": "scaffold + fp controller + plug/dock/charge loop"
+  },
+  {
+   "round": 2,
+   "piece": "Wet ground / reflections",
+   "verdict": "gap",
+   "metrics": {
+    "vision": 2
+   },
+   "note": "whiteout fog+bloom; fixed reflector flood"
+  },
+  {
+   "round": 5,
+   "piece": "Environment & sky",
+   "verdict": "gap",
+   "metrics": {
+    "vision": 3
+   },
+   "note": "HDRI on: sky great, objects not reacting"
+  },
+  {
+   "round": 9,
+   "piece": "Hero car fidelity",
+   "verdict": "gap",
+   "metrics": {
+    "vision": 2
+   },
+   "note": "CarConcept loaded; orientation wrong in view"
+  },
+  {
+   "round": 12,
+   "piece": "Wet ground / reflections",
+   "verdict": "gap",
+   "metrics": {
+    "vision": 4
+   },
+   "note": "SSAO+normal maps; ground reflection coherence still weak"
+  },
+  {
+   "round": 19,
+   "piece": "Wet ground / reflections",
+   "verdict": "gap",
+   "metrics": {
+    "vision": 3
+   },
+   "note": "emissives tamed; mirror too binary; white car clipped"
+  }
+ ]
+}

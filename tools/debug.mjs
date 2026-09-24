@@ -1,0 +1,24 @@
+import puppeteer from 'puppeteer-core';
+import http from 'http';
+import fs from 'fs';
+import path from 'path';
+const ROOT = path.resolve(import.meta.dirname, '..');
+const PORT = 8004;
+const MIME = { '.html':'text/html', '.js':'text/javascript', '.glb':'model/gltf-binary', '.hdr':'image/vnd.radiance' };
+const server = http.createServer((req,res)=>{
+  let p = decodeURIComponent(req.url.split('?')[0]);
+  if (p==='/') p='/index.html';
+  fs.readFile(path.join(ROOT,p),(e,d)=>{ if(e){res.writeHead(404);res.end('404');return;} res.writeHead(200,{'Content-Type':MIME[path.extname(p)]||'application/octet-stream','Cache-Control':'no-store'}); res.end(d); });
+});
+await new Promise(r=>server.listen(PORT,r));
+const browser = await puppeteer.launch({ executablePath:'/usr/bin/chromium', args:['--no-sandbox','--disable-gpu','--use-gl=angle','--use-angle=vulkan','--enable-unsafe-swiftshader','--disable-dev-shm-usage'], defaultViewport:{width:1280,height:720} });
+const page = await browser.newPage();
+page.on('console', m=>console.log('[console.'+m.type()+']', m.text()));
+page.on('pageerror', e=>console.log('[pageerror]', String(e && e.stack || e)));
+page.on('requestfailed', r=>console.log('[reqfail]', r.url(), String(r.failure()&&r.failure().errorText)));
+page.on('response', r=>{ if(r.status()>=400) console.log('[http'+r.status()+']', r.url()); });
+await page.goto(`http://127.0.0.1:${PORT}/`, {waitUntil:'load', timeout:60000});
+await new Promise(r=>setTimeout(r,15000));
+console.log('READY?', await page.evaluate('!!(window.__GAME && window.__GAME.ready())'));
+await page.screenshot({path: path.join(ROOT,'scratch/debug.png')});
+await browser.close(); server.close(); process.exit(0);

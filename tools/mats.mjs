@@ -1,0 +1,15 @@
+import puppeteer from 'puppeteer-core';
+import http from 'http'; import fs from 'fs'; import path from 'path';
+const ROOT='/home/lex/chargebay';
+const MIME={'.html':'text/html','.js':'text/javascript','.glb':'model/gltf-binary','.hdr':'image/vnd.radiance'};
+const srv=http.createServer((rq,rs)=>{let u=decodeURIComponent(rq.url.split('?')[0]);if(u==='/')u='/index.html';fs.readFile(path.join(ROOT,u),(e,d)=>{if(e){rs.writeHead(404);rs.end();return;}rs.writeHead(200,{'Content-Type':MIME[path.extname(u)]||'application/octet-stream'});rs.end(d);});});
+await new Promise(r=>srv.listen(8010,r));
+const b=await puppeteer.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox','--use-gl=angle','--use-angle=vulkan','--enable-unsafe-swiftshader'],defaultViewport:{width:800,height:450}});
+const pg=await b.newPage();
+await pg.goto('http://127.0.0.1:8010/',{waitUntil:'load'});
+await pg.waitForFunction('window.__GAME&&window.__GAME.ready()&&window.__GAME.envReady()',{timeout:60000});
+const mats=await pg.evaluate('window.__GAME.carMats()');
+const uniq=new Map();
+for(const m of mats) uniq.set(m.name, m);
+for(const [k,v] of uniq) console.log(k.padEnd(14), 'metal',v.metal, 'rough',v.rough, 'cc',v.cc, '#'+v.color);
+await b.close(); srv.close(); process.exit(0);
