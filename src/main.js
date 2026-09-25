@@ -418,9 +418,17 @@ function buildCanopy(){
   const fill = new THREE.PointLight(0xffb888, 34, 30, 1.7); fill.position.set(0,3.6,-1.0); g.add(fill);
   const fill2 = new THREE.PointLight(0xffa068, 22, 24, 1.5); fill2.position.set(0,1.6,3.5); g.add(fill2);
   const ledW = new THREE.MeshStandardMaterial({color:0x140e08, emissive:0xd89050, emissiveIntensity:0.9});
-  // roof slab
+  // roof slab (light-painted ceiling below so it doesn't read as a black void)
+  const ceil = new THREE.MeshStandardMaterial({color:0x9a9186, metalness:0.25, roughness:0.7, envMapIntensity:1.2});
   const roof = new THREE.Mesh(new THREE.BoxGeometry(20.4,0.28,9.2), dark);
   roof.position.set(0,4.6,-3.0); roof.castShadow=true; g.add(roof);
+  const ceilPanel = new THREE.Mesh(new THREE.PlaneGeometry(20.0,8.8), ceil);
+  ceilPanel.rotation.x=Math.PI/2; ceilPanel.position.set(0,4.455,-3.0); g.add(ceilPanel);
+  // ceiling cross beams for structure detail
+  for(let i=0;i<5;i++){
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(20.0,0.16,0.16), steel);
+    beam.position.set(0,4.34,-6.9+i*1.95); g.add(beam);
+  }
   // fascia LED strips (front + back edges)
   for(const z of [0.62, -6.7]){
     const s = new THREE.Mesh(new THREE.BoxGeometry(20.0,0.06,0.10), led);
@@ -784,6 +792,8 @@ const BUFFER_COST=600, BUFFER_CAP=200, BUFFER_RATE_KWH_MIN=0.5; // buffer charge
 const SAVE_KEY='chargebay_save_v1';
 // ---- weather/events ----
 let wxTimer=0, coldUntil=0, brownUntil=0, brownCap=500, vipPending=false, vipSpawned=false, nextWx=0;
+let solarKwh=0; const SOLAR_CAP_KW=24; // rooftop array
+let solarLast=0;
 let revenue=0, served=0;            // session
 let cash=500, day=1, dayRev=0, dayCost=0, servedTotal=0;   // meta
 let bufferOwned=false, bufferKwh=0, bufferDraining=0;
@@ -1007,7 +1017,7 @@ function saveGame(){
   try{
     const d={ v:1, cash, day, dayRev, dayCost, servedTotal, bufferOwned, bufferKwh,
       bays: bays.map(b=>({ tier:b.tier, locked:!!b.locked, sell:b.sell })), raining, gameClock, spotPrice, ts:Date.now(),
-      vipPending, coldLeft: Math.max(0,coldUntil-performance.now()), brownLeft: Math.max(0,brownUntil-performance.now()), brownCap };
+      vipPending, coldLeft: Math.max(0,coldUntil-performance.now()), brownLeft: Math.max(0,brownUntil-performance.now()), brownCap, solarKwh };
     localStorage.setItem(SAVE_KEY, JSON.stringify(d));
   }catch(e){}
 }
@@ -1018,7 +1028,7 @@ function loadGame(){
     cash=d.cash??cash; day=d.day??day; dayRev=d.dayRev||0; dayCost=d.dayCost||0; servedTotal=d.servedTotal||0;
     bufferOwned=!!d.bufferOwned; bufferKwh=d.bufferKwh||0; raining=d.raining??raining; gameClock=d.gameClock??gameClock; spotPrice=d.spotPrice??spotPrice;
     if(Array.isArray(d.bays)) d.bays.forEach((sb,i)=>{ if(bays[i]){ bays[i].tier=sb.tier||0; bays[i].locked=!!sb.locked; bays[i].sell=sb.sell||0.25; bays[i].kw=TIERS[bays[i].tier].kw; } });
-    vipPending=!!d.vipPending; brownCap=d.brownCap||500;
+    vipPending=!!d.vipPending; brownCap=d.brownCap||500; solarKwh=d.solarKwh||0;
     coldUntil=performance.now()+(d.coldLeft||0); brownUntil=performance.now()+(d.brownLeft||0);
     if(bufferOwned) addBuffer();
     return true;
@@ -1162,6 +1172,8 @@ function animate(){
   const hh=Math.floor(gameClock/60)%24, mm=Math.floor(gameClock%60);
   clockEl.textContent = String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
   spotPrice = 0.10+0.06*Math.sin(gameClock/47)+0.02*Math.sin(gameClock/7.3);
+  // solar rooftop production: clear sky + daylight -> free kWh into buffer
+  { const elev=Math.sin(((gameClock/1440)*Math.PI*2)-Math.PI/2); const sunFactor=Math.max(0,elev)*(1-Math.min(1,raining*1.4)); const gen=SOLAR_CAP_KW*sunFactor*dt/3600*60; if(gen>0){ if(bufferOwned){ bufferKwh=Math.min(BUFFER_CAP, bufferKwh+gen); } else { solarKwh+=gen; } solarLast=sunFactor; } }
   // ---- economy tick ----
   // grid buys are a cost; cheap-price surplus charges the buffer
   if(bufferOwned){
@@ -1244,10 +1256,10 @@ function animate(){
       if(Math.abs(b.car.position.z-b.driveTo)<0.05){ b.state='parked'; b.car.userData.arrived=performance.now(); SFX.chime(660,880); toast('🚗 New arrival — bay '+(BAYS.indexOf(b.x)+1)); }
     }
     if(b.barG && b.car){
-      const show = (b.state==='charging'||b.state==='ready') && b.plugged;
+      const show = b.state==='charging';
       b.barG.visible=show;
       if(show){
-        b.barG.position.set(b.car.position.x, 1.86, b.car.position.z);
+        b.barG.position.set(b.car.position.x, 1.34, b.car.position.z);
         b.barG.lookAt(camera.position);
         const pct=Math.min(1,b.car.userData.battery);
         b.barFill.scale.x=Math.max(0.001,pct);
@@ -1266,7 +1278,8 @@ function animate(){
       b.chargeKwh=(b.chargeKwh||0)+kwh;
       totalKw+=b.kw;
       // power sourcing: buffer first (free once charged), rest from grid at spot price
-      let fromBuf=Math.min(kwh, bufferOwned? bufferKwh:0);
+      let fromSol=Math.min(kwh, solarKwh); solarKwh-=fromSol;
+      let fromBuf=Math.min(kwh-fromSol, bufferOwned? bufferKwh:0);
       bufferKwh-=fromBuf; if(fromBuf>0) bufferDraining+=fromBuf;
       const fromGrid=kwh-fromBuf;
       const cost = fromGrid*spotPrice;
@@ -1298,7 +1311,7 @@ function animate(){
   loadEl.textContent = totalKw+' kW';
   if(cashEl){ cashEl.textContent='$'+cash.toFixed(2); cashEl.className = cash>=0?'good':'bad'; }
   if(dayEl) dayEl.textContent=day;
-  if(bufEl) bufEl.textContent= bufferOwned? Math.round(bufferKwh)+' / '+BUFFER_CAP+' kWh' : '—';
+  if(bufEl) bufEl.textContent = (bufferOwned? Math.round(bufferKwh)+' / '+BUFFER_CAP+' kWh':'—') + (solarLast>0.02? ' · ☀ '+Math.round(solarLast*SOLAR_CAP_KW)+' kW':'');
   revEl.textContent = '$'+revenue.toFixed(2);
   servedEl.textContent = served;
 
@@ -1392,6 +1405,7 @@ window.__GAME = {
     if(name==='rain'){ raining=0.8; return 'rain'; } return 'none'; },
   forceArr(i,vip){ const b=bays[i]; if(b.state!=='empty') return 'busy'; spawnCar(b,false,!!vip); return 'ok'; },
   info(){ return {nightK:+nightK.toFixed(3), clock:Math.floor(gameClock), protos:carProtos.length, fixtures:nightFixtures.length}; },
+  solar(){ return {last:+solarLast.toFixed(2), stored:+solarKwh.toFixed(2), capKW:SOLAR_CAP_KW}; },
   // ---- soak-test hooks: drive the REAL interaction path ----
   bayState(i){ const b=bays[i]; return {state:b.state, batt:b.car?+b.car.userData.battery.toFixed(3):null, kwh:+(b.chargeKwh||0).toFixed(3), pat:b.car?+((performance.now()-b.car.userData.arrived)/1000).toFixed(1):null}; },
   grab(i){ if(bays[i].plugged) return 'plugged'; if(grabbedBay&&grabbedBay!==bays[i]) return 'busy'; grabbedBay=bays[i]; docked=false; return 'grabbed'; },

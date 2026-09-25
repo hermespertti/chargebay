@@ -81,6 +81,7 @@ check('served count incremented', e2.served>=1, JSON.stringify(e2));
 check('session revenue plausible (kWh*price)', e2.revenue>=1 && e2.revenue<=15, '$'+e2.revenue);
 const mon=await S('window.__GAME.money()');
 check('cash netted (rev-cost) tracked', typeof mon.cash==='number', JSON.stringify(mon));
+check('solar production tracks daylight', (await S('window.__GAME.solar().last'))>=0, String(await S('window.__GAME.solar().last')));
 check('day counter live', mon.day>=1, 'day '+mon.day);
 const saveOK=await S('(()=>{ localStorage.removeItem("chargebay_save_v1"); window.__GAME? 0:0; return 1; })()');
 await S('window.__GAME.save()');
