@@ -30,13 +30,14 @@ const DAY = { t: 0.78 }; // 0..1, dusk ~0.75-0.82
 
 // PMREM env for PBR reflections
 let envReady=false;
-new RGBELoader().load('assets/hdri/sunset.hdr', (hdr)=>{
+const HDRI = localStorage.getItem('cb_hdri') || 'assets/hdri/dusk2.hdr';
+new RGBELoader().load(HDRI, (hdr)=>{
   const pmrem = new THREE.PMREMGenerator(renderer);
   pmrem.compileEquirectangularShader();
   const env = pmrem.fromEquirectangular(hdr).texture;
   scene.environment = env;
   scene.background = env;
-  scene.backgroundIntensity = 0.6;
+  scene.backgroundIntensity = 1.0;
   if('environmentIntensity' in scene) scene.environmentIntensity = 1.1;
   hdr.dispose(); pmrem.dispose();
   sky.visible = false;
@@ -75,15 +76,21 @@ function makeSky() {
       void main(){
         vec3 d = normalize(vP);
         float h = d.y;
-        vec3 c = mix(botCol, midCol, smoothstep(-0.05,0.28,h));
-        c = mix(c, topCol, smoothstep(0.2,0.9,h));
+        vec3 c = mix(botCol, midCol, smoothstep(-0.05,0.30,h));
+        c = mix(c, topCol, smoothstep(0.22,0.75,h));
+        // tiny blue-grey lift toward very top to kill maroon seam
+        c = mix(c, topCol*1.12+vec3(0.03,0.03,0.06), smoothstep(0.72,1.0,h));
         // sun afterglow
         float s = max(dot(d, normalize(sunDir)),0.);
         c += sunCol * (pow(s,14.)*0.85 + pow(s,4.)*0.28);
-        // subtle band clouds
-        float band = sin(d.x*3.1+ d.z*1.7)*0.5+0.5;
-        float cl = smoothstep(0.55,0.95, band*smoothstep(-0.02,0.35,h));
-        c = mix(c, mix(c, vec3(0.35,0.30,0.42), 0.55), cl*0.6);
+        // soft procedural wispy clouds
+        float n1 = sin(d.x*4.0+d.y*2.0)*sin(d.z*3.3-d.y*1.5)*0.5+0.5;
+        float n2 = sin(d.x*9.0-d.z*7.0)*0.5+0.5;
+        float wis = smoothstep(0.55,0.95, (n1*0.7+n2*0.3)*smoothstep(0.02,0.4,h));
+        c = mix(c, mix(c*1.25, vec3(0.52,0.44,0.56), 0.5), wis*0.35);
+        // ordered dither to kill banding
+        float dt = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233)))*43758.5453);
+        c += (dt-0.5)/255.0*3.0;
         gl_FragColor = vec4(c,1.);
       }`
   });
@@ -93,8 +100,8 @@ const sky = makeSky(); scene.add(sky);
 function applyDaylight(){
   // dusk palette
   const t = DAY.t;
-  const top = new THREE.Color().setHSL(0.62, 0.75, 0.06 + 0.06*(1-t));
-  const mid = new THREE.Color().setHSL(0.66, 0.55, 0.16);
+  const top = new THREE.Color().setHSL(0.64, 0.52, 0.26 + 0.06*(1-t));
+  const mid = new THREE.Color().setHSL(0.70, 0.48, 0.34);
   const bot = new THREE.Color().setHSL(0.07, 0.88, 0.42);
   const sun = new THREE.Color().setHSL(0.06, 0.95, 0.72);
   const u = sky.material.uniforms;
@@ -559,6 +566,10 @@ async function loadAssets(){
   console.log('STAGE hero');
   const hero1 = await loadGLB('assets/car_concept.glb');
   const h1 = orientCar(hero1.scene); boostEnv(h1, 3.2);
+  h1.traverse(o=>{ if(o.isMesh&&o.material){ const n=(o.material.name||'').toLowerCase();
+    if(n.includes('glass')){ o.material=o.material.clone(); o.material.transparent=true; o.material.opacity=0.35; o.material.roughness=0.05; o.material.side=THREE.DoubleSide; }
+    if(n.includes('signallight')||n.includes('light')){ o.material=o.material.clone(); o.material.emissive=new THREE.Color(0xff2010); o.material.emissiveIntensity=2.5; }
+  }});
   carProtos.push(h1);
   // paint variants of h1
   for(const col of [PAINTS[0], PAINTS[1], PAINTS[2], PAINTS[3]]){
@@ -791,6 +802,8 @@ function animate(){
   sign.drawSign(spotPrice*100);
   fog.density = 0.007 + raining*0.0015;
 
+  // wet shimmer: drift asphalt normal UVs while raining
+  if(raining>0.05 && asphalt.material.normalMap){ asphalt.material.normalMap.offset.x=(asphalt.material.normalMap.offset.x+dt*0.004)%1; asphalt.material.normalMap.offset.y=(asphalt.material.normalMap.offset.y+dt*0.006)%1; }
   // rain update — streak drop + reinstance
   const fall=(9+raining*11)*dt, wind=raining*2.2*dt;
   for(let i=0;i<rainCount;i++){
@@ -878,7 +891,7 @@ try{
   ssao.output = SSAOPass.OUTPUT.Default;
   composer.addPass(ssao);
 }catch(e){ console.warn('ssao unavailable', e); }
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 0.16, 0.5, 0.92);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 0.12, 0.45, 0.95);
 composer.addPass(bloom);
 const FinalFX = {
   uniforms:{ tDiffuse:{value:null}, time:{value:0}, aberr:{value:0.0006}, grain:{value:0.006}, vign:{value:0.24} },
