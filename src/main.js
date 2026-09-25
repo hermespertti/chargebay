@@ -677,12 +677,12 @@ async function loadPlugs(){
 }
 
 // spawn a car at a bay with random paint & battery
-function spawnCar(bay, instant=false){
+function spawnCar(bay, instant=false, vip=false){
   const proto = carProtos[Math.floor(Math.random()*carProtos.length)];
   const car = proto.clone(true);
   car.traverse(o=>{ if(o.isMesh){o.castShadow=true; o.receiveShadow=true;} });
-  const roll = 0.08+Math.random()*0.5;
-  car.userData = { battery: roll, need: 0.72+Math.random()*0.25, patience: 150+Math.random()*90, arrived: performance.now() };
+  const roll = vip? 0.03+Math.random()*0.12 : 0.08+Math.random()*0.5;
+  car.userData = { battery: roll, need: vip? 0.95 : 0.72+Math.random()*0.25, patience: vip? 75 : 150+Math.random()*90, arrived: performance.now(), vip };
   car.position.set(bay.x, 0, instant? -3.1 : 16 + Math.random()*6);
   car.rotation.y = Math.PI; // front faces chargers (-Z if model front is +Z we flip after vision check)
   // ground light refs: behind (tail, red) and front (head, warm) — car forward is -Z after rot.y=PI/2
@@ -691,6 +691,7 @@ function spawnCar(bay, instant=false){
   tail.rotation.x=-Math.PI/2; tail.position.set(car.position.x, 0.016, car.position.z+1.4); tail.rotation.z=Math.PI; tail.renderOrder=5; scene.add(tail); bay.tailRefl=tail;
   const head=new THREE.Mesh(new THREE.PlaneGeometry(1.5,2.2), new THREE.MeshBasicMaterial({map:carReflTexWarm,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.15}));
   head.rotation.x=-Math.PI/2; head.position.set(car.position.x, 0.016, car.position.z-1.2); head.renderOrder=5; scene.add(head); bay.headRefl=head;
+  if(vip){ car.traverse(o=>{ if(o.isMesh&&o.material&&o.material.name&&o.material.name.toLowerCase().includes('paint')){ o.material=o.material.clone(); o.material.color.setHex(0xd9a520); o.material.metalness=0.95; o.material.roughness=0.15; } }); }
   scene.add(car); bay.car=car; bay.state='arriving';
   // world-space charge progress bar floating above the car
   const barG=new THREE.Group();
@@ -717,6 +718,8 @@ const PACK_KWH = 75; // kWh per full charge
 const TIERS = [ {kw:150,cost:0}, {kw:350,cost:800}, {kw:600,cost:2000} ];
 const BUFFER_COST=600, BUFFER_CAP=200, BUFFER_RATE_KWH_MIN=0.5; // buffer charge rate at cheap prices
 const SAVE_KEY='chargebay_save_v1';
+// ---- weather/events ----
+let wxTimer=0, coldUntil=0, brownUntil=0, brownCap=500, vipPending=false, vipSpawned=false, nextWx=0;
 let revenue=0, served=0;            // session
 let cash=500, day=1, dayRev=0, dayCost=0, servedTotal=0;   // meta
 let bufferOwned=false, bufferKwh=0, bufferDraining=0;
@@ -729,6 +732,28 @@ const clockEl=document.getElementById('clock'), priceEl=document.getElementById(
 
 function toast(msg){ toastEl.innerHTML=msg; toastEl.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>toastEl.classList.remove('show'),2200); }
 
+// ---------------- camera lens rain FX (DOM) ----------------
+let lensFx=null, lensCv=null, lensG=null, drops=[];
+function initLensFx(){
+  lensCv=document.createElement('canvas'); lensCv.width=640; lensCv.height=360;
+  lensCv.id='lensfx'; document.getElementById('app').appendChild(lensCv);
+  lensG=lensCv.getContext('2d'); lensFx=lensCv;
+  for(let i=0;i<40;i++) drops.push({x:Math.random()*640, y:Math.random()*360, r:1.5+Math.random()*3.5, v:0.2+Math.random()*0.6, trail:0});
+}
+function lensDrip(dt){
+  if(!lensG) return;
+  lensG.clearRect(0,0,640,360);
+  for(const d of drops){
+    d.y += d.v*dt*(60+d.r*40);
+    if(d.y>360+d.r){ d.y=-d.r*3; d.x=Math.random()*640; d.trail=0; }
+    // droplet blob
+    const g=lensG.createRadialGradient(d.x,d.y,0.5,d.x,d.y,d.r*2.4);
+    g.addColorStop(0,'rgba(255,250,240,0.55)'); g.addColorStop(0.6,'rgba(200,220,235,0.16)'); g.addColorStop(1,'rgba(0,0,0,0)');
+    lensG.fillStyle=g; lensG.beginPath(); lensG.arc(d.x,d.y,d.r*2.4,0,Math.PI*2); lensG.fill();
+    // trail when running
+    if(d.v>0.45){ lensG.fillStyle='rgba(220,235,245,0.10)'; lensG.fillRect(d.x-d.r*0.6, d.y-d.r*8, d.r*1.2, d.r*8); }
+  }
+}
 // ---------------- AUDIO: procedural Web Audio (no assets) ----------------
 const SFX = (function(){
   let ctx=null, master=null, rainGain=null, rainSrc=null, humGain=null, humOsc=[], humFilter=null, muted=false;
@@ -908,15 +933,17 @@ function currentTarget(){
 function paySession(b){
   if((b.chargeKwh||0)>0.05){
     served++; servedTotal++;
+    let fee=0; if(b.car && b.car.userData.vip){ fee=b.sessionRev*0.5; b.sessionRev+=fee; }
     const prof=b.sessionRev-b.sessionCost; cash+=prof; dayRev+=b.sessionRev; dayCost+=b.sessionCost;
-    toast('🎉 Charge complete · +$'+b.sessionRev.toFixed(2)+' · profit <b>$'+prof.toFixed(2)+'</b>');
+    toast((b.car&&b.car.userData.vip?'👑 VIP tip +$'+fee.toFixed(2)+' · ':'')+'🎉 Complete +$'+b.sessionRev.toFixed(2)+' · profit <b>$'+prof.toFixed(2)+'</b>');
   }
   b.sessionRev=0; b.sessionCost=0;
 }
 function saveGame(){
   try{
     const d={ v:1, cash, day, dayRev, dayCost, servedTotal, bufferOwned, bufferKwh,
-      bays: bays.map(b=>({ tier:b.tier, locked:!!b.locked, sell:b.sell })), raining, gameClock, spotPrice, ts:Date.now() };
+      bays: bays.map(b=>({ tier:b.tier, locked:!!b.locked, sell:b.sell })), raining, gameClock, spotPrice, ts:Date.now(),
+      vipPending, coldLeft: Math.max(0,coldUntil-performance.now()), brownLeft: Math.max(0,brownUntil-performance.now()), brownCap };
     localStorage.setItem(SAVE_KEY, JSON.stringify(d));
   }catch(e){}
 }
@@ -927,6 +954,9 @@ function loadGame(){
     cash=d.cash??cash; day=d.day??day; dayRev=d.dayRev||0; dayCost=d.dayCost||0; servedTotal=d.servedTotal||0;
     bufferOwned=!!d.bufferOwned; bufferKwh=d.bufferKwh||0; raining=d.raining??raining; gameClock=d.gameClock??gameClock; spotPrice=d.spotPrice??spotPrice;
     if(Array.isArray(d.bays)) d.bays.forEach((sb,i)=>{ if(bays[i]){ bays[i].tier=sb.tier||0; bays[i].locked=!!sb.locked; bays[i].sell=sb.sell||0.25; bays[i].kw=TIERS[bays[i].tier].kw; } });
+    vipPending=!!d.vipPending; brownCap=d.brownCap||500;
+    coldUntil=performance.now()+(d.coldLeft||0); brownUntil=performance.now()+(d.brownLeft||0);
+    if(bufferOwned) addBuffer();
     return true;
   }catch(e){ return false; }
 }
@@ -1084,11 +1114,28 @@ function animate(){
   for(const b of bays){
     if(b.locked) continue;
     if(b.state==='empty' && b.nextArrT && now>=b.nextArrT){
-      spawnCar(b, false);
+      spawnCar(b, false, vipPending && !vipSpawned); if(vipPending) vipSpawned=true;
       b.nextArrT = now + (12000 - Math.min(8000, spotPrice*40000)) * (0.6+Math.random()*0.8);
+
     }
   }
   }
+  // ---- random events scheduler ----
+  if(now>nextWx){
+    nextWx = now + 60000+Math.random()*90000; // every 1-2.5 real min
+    const r=Math.random();
+    if(r<0.34){ // cold snap: charge speed -35% for 60s
+      coldUntil=now+60000; SFX.chime(440,330); toast('🧊 Cold snap · charging slower for a minute');
+    } else if(r<0.62){ // brownout: grid capped
+      brownUntil=now+45000; brownCap= bays.filter(x=>!x.locked).length>2? 500:350; SFX.chime(330,240); toast('⚠️ Brownout · grid capped at '+brownCap+' kW');
+    } else if(r<0.82){ // VIP stranded car: urgent, big tip
+      vipPending=true; vipSpawned=false; toast('👑 VIP stranded outside town — needs rescue charge!');
+      bays.forEach(b=>{ if(!b.locked && b.state==='empty') b.nextArrT = Math.min(b.nextArrT||0, now+4000); });
+    } else { // weather shift
+      raining = Math.random()<0.5? 0.15+Math.random()*0.2 : 0.65+Math.random()*0.35;
+    }
+  }
+  const cold = now<coldUntil;
   // day rollover at 00:00
   if(gameClock>=24*60){ gameClock-=24*60; endDay(); }
   priceEl.textContent = (spotPrice*100).toFixed(1)+'¢/kWh';
@@ -1111,7 +1158,13 @@ function animate(){
   }
   rain.instanceMatrix.needsUpdate=true;
   rainMat.opacity = 0.28+raining*0.30;
-  wxEl.textContent = raining>0.4?'Light rain':'Clear dusk';
+  // camera lens droplets overlay
+  if(lensFx){ lensFx.style.opacity = Math.min(1, raining*1.15); raining>0.05 && lensDrip(dt); }
+  let wx='Clear dusk';
+  if(raining>0.4) wx='Light rain';
+  if(now<coldUntil) wx = (raining>0.4?'Freezing rain':'Cold snap');
+  if(now<brownUntil) wx += wx==='Clear dusk'? ' · Brownout' : ' + Brownout';
+  wxEl.textContent = wx;
   SFX.setRain(raining);
 
   // bay logic
@@ -1139,7 +1192,9 @@ function animate(){
       }
     }
     if(b.state==='charging' && b.car){
-      const add = dt*(b.kw/350)*0.02; // 600 kW tiers fill twice as fast
+      // brownout throttle: if adding this bay exceeds cap, pause the newest charger
+      if(totalKw + b.kw > brownCap && now<brownUntil){ b.state='ready'; SFX.click(160); toast('⚠️ Bay throttled — brownout cap '+brownCap+' kW'); continue; }
+      const add = dt*(b.kw/350)*0.02*(now<coldUntil?0.65:1); // cold slows chemistry
       const kwh = add*PACK_KWH;
       b.car.userData.battery=Math.min(1,b.car.userData.battery+add);
       b.chargeKwh=(b.chargeKwh||0)+kwh;
@@ -1260,9 +1315,15 @@ window.__GAME = {
   carBoxes(){ const out=[]; for(const b of bays){ if(b.car){ const bb=new THREE.Box3().setFromObject(b.car); out.push({bay:b.x, state:b.state, min:bb.min.toArray().map(v=>+v.toFixed(2)), max:bb.max.toArray().map(v=>+v.toFixed(2))}); } } return out; },
   pose(x,y,z,ry,rx){ camera.position.set(x,y,z); camera.rotation.set(rx||0,ry,0); },
   groundInfo(){ const mats=[]; scene.traverse(o=>{ if(o.isMesh && o.geometry && o.geometry.type==='PlaneGeometry' && o.geometry.parameters && o.geometry.parameters.width===220){ const m=o.material; mats.push({name:m.name||'std', hasMap:!!m.map, mapSrc:m.image?m.image.src||m.image.currentSrc||('w'+m.image.width):null, repeat:m.map?[m.map.repeat.x,m.map.repeat.y]:null, rough:m.roughness, metal:m.metalness, vis:o.visible}); } }); return mats; },
-  weather(v){ raining=Math.max(0,Math.min(1,v)); },
   serve(){ served+=1; },
   setClock(h){ gameClock=h*60; },
+  weather(v){ raining=Math.max(0,Math.min(1,v)); },
+  event(name){ const t=performance.now();
+    if(name==='cold'){ coldUntil=t+60000; return 'cold'; }
+    if(name==='brown'){ brownUntil=t+45000; brownCap=500; return 'brown'; }
+    if(name==='vip'){ vipPending=true; vipSpawned=false; return 'vip'; }
+    if(name==='rain'){ raining=0.8; return 'rain'; } return 'none'; },
+  forceArr(i,vip){ const b=bays[i]; if(b.state!=='empty') return 'busy'; spawnCar(b,false,!!vip); return 'ok'; },
   // ---- soak-test hooks: drive the REAL interaction path ----
   bayState(i){ const b=bays[i]; return {state:b.state, batt:b.car?+b.car.userData.battery.toFixed(3):null, kwh:+(b.chargeKwh||0).toFixed(3), pat:b.car?+((performance.now()-b.car.userData.arrived)/1000).toFixed(1):null}; },
   grab(i){ if(bays[i].plugged) return 'plugged'; if(grabbedBay&&grabbedBay!==bays[i]) return 'busy'; grabbedBay=bays[i]; docked=false; return 'grabbed'; },
@@ -1275,6 +1336,7 @@ window.__GAME = {
   audio(){ return { active: !!(window.__SFXREF && window.__SFXREF.ctx), muted: SFX.muted }; },
 };
 
+initLensFx();
 loadAssets().catch(e=>{ console.error('asset load failed', e && e.type, e && e.message); ready=true; if(!envReady) envReady=true; });
 setInterval(()=>{ if(ready) saveGame(); }, 30000);
 addEventListener('beforeunload', ()=>{ if(ready) saveGame(); });
