@@ -777,7 +777,7 @@ async function loadPlugs(){
   const p = await loadGLB('assets/plug.glb'); plugsProto=p.scene;
   bays.forEach(b=>{
     const pl = plugsProto.clone(true);
-    pl.position.set(b.x+0.70, 0.95, -6.0); pl.rotation.set(0,0,-Math.PI/2); pl.scale.setScalar(1.15);
+    pl.position.set(b.x+0.70, 0.98, -6.0); pl.rotation.set(Math.PI,0,0); pl.scale.setScalar(1.15);
     pl.traverse(o=>{ if(o.isMesh){ o.castShadow=true; if(o.material && o.material.name==='CableJacket') o.visible=false; } });
     scene.add(pl); b.plug=pl; b.plugHome={pos:pl.position.clone(), rot:pl.rotation.clone()};
     b.glandPos=new THREE.Vector3(b.x+0.36, 0.55, -6.0);
@@ -1223,10 +1223,14 @@ function tryInteract(){
       const port=bayPort(b);
       if(port.distanceTo(camera.position)<2.2){
         docked=true; b.plugged=true; b.car.userData.docked=true; b.state='ready';
-        // snap plug nozzle into port: model nozzle -Y -> world +X = 120deg about (1,1,1)
-        b.plug.position.copy(port); b.plug.position.y+=0.02;
-        // nozzle is model -Y; Rz(-90) sends -Y -> -X = straight into the side port
-        b.plug.quaternion.set(0,0,-0.7071068,0.7071068);
+        // GLB ground truth: nozzle tip = local +Y (tip at y .17..21), face-up = local +Z.
+        // insert along the car's lateral body normal (through the side port), not toward car center
+        const inward=new THREE.Vector3(1,0,0).applyQuaternion(b.car.quaternion); // port is local -X side => into body = car local +X
+        const up=new THREE.Vector3(0,1,0);
+        const xA=new THREE.Vector3().crossVectors(up,inward); if(xA.lengthSq()<1e-6) xA.set(1,0,0); xA.normalize();
+        const zA=new THREE.Vector3().crossVectors(inward,xA).normalize();
+        b.plug.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xA,inward,zA));
+        b.plug.position.copy(port).addScaledVector(inward,0.06);
         autoEnergize(b);
         grabbedBay=null; docked=false;
         SFX.latch(); toast('✅ Locked — charging'); return;
@@ -1663,6 +1667,11 @@ window.__GAME = {
   techmenu(force){ toggleTechMenu(force); return techOpen; },
   aimPort(i){ const b=bays[i]; if(!b.car) return 'nocar'; const p=bayPort(b); camera.position.set(p.x+1.35, p.y+0.15, p.z+0.45); camera.lookAt(p); return 'ok'; },
   portPos(i){ const b=bays[i]; if(!b.car) return null; const p=bayPort(b); return {x:+p.x.toFixed(2),y:+p.y.toFixed(2),z:+p.z.toFixed(2)}; },
+  carPos(i){ const b=bays[i]; if(!b.car) return null; return {x:+b.car.position.x.toFixed(2),y:+b.car.position.y.toFixed(2),z:+b.car.position.z.toFixed(2),yaw:+b.car.rotation.y.toFixed(2)}; },
+  plugBox(i){ const b=bays[i]; if(!b.plug) return null; const bb=new THREE.Box3().setFromObject(b.plug); return {min:[+bb.min.x.toFixed(2),+bb.min.y.toFixed(2),+bb.min.z.toFixed(2)],max:[+bb.max.x.toFixed(2),+bb.max.y.toFixed(2),+bb.max.z.toFixed(2)]}; },
+  plugRot(i,z,x){ const b=bays[i]; if(!b.plug) return 'noplug'; if(z!==undefined) b.plug.quaternion.setFromEuler(new THREE.Euler(x||0, 0, z, 'ZXY')); else b.plug.quaternion.set(0,0,0,1); b.plug.position.copy(bayPort(b)); return 'ok'; },
+  plugTip(i){ const b=bays[i]; if(!b.plug) return null; const v=new THREE.Vector3(0,1,0).applyQuaternion(b.plug.quaternion); return {x:+v.x.toFixed(2),y:+v.y.toFixed(2),z:+v.z.toFixed(2)}; },
+  dockVisual(i){ const b=bays[i]; if(!b.plug||!b.car) return 'nodata'; const port=bayPort(b); const inward=new THREE.Vector3(1,0,0).applyQuaternion(b.car.quaternion); const up=new THREE.Vector3(0,1,0); const xA=new THREE.Vector3().crossVectors(up,inward); if(xA.lengthSq()<1e-6) xA.set(1,0,0); xA.normalize(); const zA=new THREE.Vector3().crossVectors(inward,xA).normalize(); b.plug.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xA,inward,zA)); b.plug.position.copy(port).addScaledVector(inward,0.06); return this.plugTip(i); },
   cableView(i){ const b=bays[i]; if(!b.car||!b.glandPos) return 'nodata'; const p=bayPort(b); const mid=p.clone().add(b.glandPos).multiplyScalar(0.5); const dir=p.clone().sub(b.glandPos); const side=new THREE.Vector3(-dir.z,0,dir.x).normalize(); camera.position.copy(mid).add(side.multiplyScalar(1.6)).add(new THREE.Vector3(0,0.55,0)); camera.lookAt(mid); return 'ok'; },
   aimCharger(i){ const b=bays[i]; camera.position.set(b.x+1.9, 1.15, -4.3); const look=new THREE.Vector3(b.x,0.95,-6.0); camera.lookAt(look); return 'ok'; },
   hidecars(v){ bays.forEach(b=>{ if(b.car) b.car.visible=!v; }); return 'ok'; },
