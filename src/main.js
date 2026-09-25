@@ -1572,6 +1572,8 @@ window.__GAME = {
   info(){ return {nightK:+nightK.toFixed(3), clock:Math.floor(gameClock), protos:carProtos.length, fixtures:nightFixtures.length}; },
   camPos(){ return {x:+camera.position.x.toFixed(2), y:+camera.position.y.toFixed(2), z:+camera.position.z.toFixed(2)}; },
   setBatt(i,v){ if(bays[i].car){ bays[i].car.userData.battery=v; return 'ok'; } return 'nocar'; },
+  q(){ return {mode:Q.mode, fps:diag.fps, pxr:renderer.getPixelRatio?+renderer.getPixelRatio().toFixed(2):null}; },
+  qset(m){ qApply(m); return Q.mode; },
   solar(){ return {last:+solarLast.toFixed(2), stored:+solarKwh.toFixed(2), capKW:SOLAR_CAP_KW}; },
   // ---- soak-test hooks: drive the REAL interaction path ----
   bayState(i){ const b=bays[i]; return {state:b.state, batt:b.car?+b.car.userData.battery.toFixed(3):null, kwh:+(b.chargeKwh||0).toFixed(3), pat:b.car?+((performance.now()-b.car.userData.arrived)/1000).toFixed(1):null}; },
