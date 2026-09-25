@@ -654,6 +654,16 @@ function spawnCar(bay, instant=false){
   const head=new THREE.Mesh(new THREE.PlaneGeometry(1.5,2.2), new THREE.MeshBasicMaterial({map:carReflTexWarm,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.15}));
   head.rotation.x=-Math.PI/2; head.position.set(car.position.x, 0.016, car.position.z-1.2); head.renderOrder=5; scene.add(head); bay.headRefl=head;
   scene.add(car); bay.car=car; bay.state='arriving';
+  // world-space charge progress bar floating above the car
+  const barG=new THREE.Group();
+  const barBg=new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.14), new THREE.MeshBasicMaterial({color:0x071018,transparent:true,opacity:0.72,depthWrite:false}));
+  const barFill=new THREE.Mesh(new THREE.PlaneGeometry(1.44,0.08), new THREE.MeshBasicMaterial({color:0x35e07c,transparent:true,opacity:0.95,depthWrite:false}));
+  barFill.position.z=0.001;
+  const barTxt=new THREE.Sprite(new THREE.SpriteMaterial({map:barPctTex(''),transparent:true,depthWrite:false}));
+  barTxt.scale.set(0.62,0.31,1); barTxt.position.set(0,0.20,0.002);
+  barBg.add(barFill); barG.add(barBg); barG.add(barTxt);
+  barG.position.set(car.position.x, 1.86, car.position.z); barG.visible=false; barG.renderOrder=8;
+  scene.add(barG); bay.barG=barG; bay.barFill=barFill; bay.barTxt=barTxt; bay.barLast='';
   // drive-in animation target
   bay.driveTo = -3.1;
 }
@@ -846,41 +856,63 @@ function currentTarget(){
   return null;
 }
 
+function paySession(b){ if((b.chargeKwh||0)>0.05){ served++; } b.sessionRev=0; }
+
 function tryInteract(){
   const t = currentTarget();
   if(!t) return;
   const b=t.bay;
-  if(grabbedBay===b && docked){ // unplug
-    docked=false; b.state='parked';
-    b.car.userData.arrived=performance.now(); // fresh patience so they can re-plug
-    b.car.userData.docked=false; SFX.click(200); toast('🔌 Connector unplugged');
-    grabbedBay.plug.position.copy(grabbedBay.plugHome.pos);
-    grabbedBay.plug.rotation.copy(grabbedBay.plugHome.rot);
+  // holding THIS bay's connector, docked in hand -> unplug
+  if(grabbedBay===b && docked){
+    docked=false; b.plugged=false; b.state='parked';
+    b.car.userData.arrived=performance.now();
+    b.car.userData.docked=false; SFX.click(200);
+    if((b.chargeKwh||0)>0.05){ paySession(b); toast('🔌 Unplugged — paid'); }
+    else toast('🔌 Connector unplugged');
+    b.plug.position.copy(b.plugHome.pos); b.plug.rotation.copy(b.plugHome.rot);
     grabbedBay=null; return;
   }
+  // holding this bay's connector in hand -> try to dock
   if(grabbedBay===b && !docked){
-    // attempt dock: close to port?
     if(b.car){
       const port=new THREE.Vector3(-1.5*(b.car.scale.x),0.62,-0.95);
       port.applyQuaternion(b.car.quaternion); port.add(b.car.position);
       if(port.distanceTo(camera.position)<2.2){
-        docked=true; b.car.userData.docked=true; b.state='ready';
+        docked=true; b.plugged=true; b.car.userData.docked=true; b.state='ready';
+        // snap plug onto the port; hands free -> can service other bays while charging
+        b.plug.position.copy(port); b.plug.position.y+=0.05;
+        grabbedBay=null; docked=false;
         SFX.latch(); toast('✅ Locked — press R to energize'); return;
       } else { toast('❌ Move closer to the port'); return; }
     }
   }
-  if(t.type==='charger' && !grabbedBay){
-    // if bay car present and port side reachable, grabbing plug allowed
+  // hands free, looking at a plugged car -> unplug it (finishes session)
+  if(!grabbedBay && t.type==='car' && b.plugged){
+    if(b.state==='charging'){ b.state='parked'; }
+    b.plugged=false; b.car.userData.docked=false;
+    b.car.userData.arrived=performance.now(); SFX.click(200);
+    if((b.chargeKwh||0)>0.05){ paySession(b); toast('🔌 Unplugged — paid'); }
+    else toast('🔌 Connector unplugged');
+    b.plug.position.copy(b.plugHome.pos); b.plug.rotation.copy(b.plugHome.rot);
+    return;
+  }
+  // grab a connector (bay must have a car and not be plugged already)
+  if(t.type==='charger' && !grabbedBay && !b.plugged && b.car){
     grabbedBay=b; docked=false; SFX.click(260); toast('🔌 Grabbed connector — aim at car port, press E');
     return;
   }
+  if(t.type==='charger' && b.plugged && !grabbedBay){ toast('⚡ Bay already charging'); }
 }
 
-function toggleCharge(){
-  if(!grabbedBay || !docked) { toast('Dock the connector first (E)'); return; }
-  const b=grabbedBay;
+function toggleCharge(forceBay){
+  // R works on the bay you're looking at once its connector is docked; the plug
+  // stays on the car and charging continues hands-free -> multiple cars at once.
+  let b= forceBay!=null ? bays[forceBay] : (grabbedBay && docked ? grabbedBay : (currentTarget()? currentTarget().bay : null));
+  if(!b){ toast('Aim at a charger'); return; }
+  if(!b.plugged){ toast('Dock the connector first (E)'); return; }
   if(b.state==='charging'){ b.state='ready'; SFX.click(180); toast('⏸ Charging paused'); return; }
   b.state='charging'; b.price=spotPrice; b.kwhStart=0; b.chargeKwh=0;
+  if(grabbedBay===b){ grabbedBay=null; docked=false; } // hand released, plug stays on car
   SFX.click(420); toast('⚡ Charging at 350 kW');
 }
 
@@ -916,6 +948,7 @@ rain.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 scene.add(rain);
 let raining=0.7;
 // per-car ground light reflection quads (tail + head)
+function barPctTex(t){ const c=document.createElement('canvas'); c.width=256;c.height=128; const g=c.getContext('2d'); g.clearRect(0,0,256,128); g.font='bold 88px Segoe UI, sans-serif'; g.textAlign='center'; g.textBaseline='middle'; g.fillStyle='rgba(225,245,255,0.98)'; g.strokeStyle='rgba(0,0,0,0.75)'; g.lineWidth=7; g.strokeText(t,128,66); g.fillText(t,128,66); const tx=new THREE.CanvasTexture(c); tx.colorSpace=THREE.SRGBColorSpace; return tx; }
 const carReflTexRed = (function(){
   const c=document.createElement('canvas'); c.width=128;c.height=256; const g=c.getContext('2d');
   const grd=g.createLinearGradient(0,0,0,256);
@@ -984,6 +1017,20 @@ function animate(){
       if(b.cshadow) b.cshadow.position.z = b.car.position.z;
       if(Math.abs(b.car.position.z-b.driveTo)<0.05){ b.state='parked'; SFX.chime(660,880); toast('🚗 New arrival — bay '+(BAYS.indexOf(b.x)+1)); }
     }
+    if(b.barG && b.car){
+      const show = (b.state==='charging'||b.state==='ready') && b.plugged;
+      b.barG.visible=show;
+      if(show){
+        b.barG.position.set(b.car.position.x, 1.86, b.car.position.z);
+        b.barG.lookAt(camera.position);
+        const pct=Math.min(1,b.car.userData.battery);
+        b.barFill.scale.x=Math.max(0.001,pct);
+        b.barFill.position.x=-0.72*(1-pct);
+        b.barFill.material.color.setHex(b.state==='charging'?(pct>0.85?0x7dff9e:0x35e07c):0xf0c060);
+        const lbl=Math.round(pct*100)+'%';
+        if(b.barLast!==lbl){ b.barLast=lbl; const old=b.barTxt.material.map; b.barTxt.material.map=barPctTex(lbl); b.barTxt.material.needsUpdate=true; if(old)old.dispose(); }
+      }
+    }
     if(b.state==='charging' && b.car){
       const add = dt*0.02; // fraction of pack per real second (~45 s full charge, game-time compressed)
       const kwh = add*PACK_KWH;
@@ -991,7 +1038,7 @@ function animate(){
       b.chargeKwh=(b.chargeKwh||0)+kwh;
       totalKw+=350;
       const rev = kwh*b.price; revenue+=rev; b.sessionRev+=rev;
-      if(b.car.userData.battery>=1){ b.state='departing'; toast('🎉 Charge complete +$'+b.sessionRev.toFixed(2)); SFX.cash(); served++; b.sessionRev=0; }
+      if(b.car.userData.battery>=1){ b.state='departing'; b.plugged=false; toast('🎉 Charge complete +$'+b.sessionRev.toFixed(2)); SFX.cash(); served++; b.sessionRev=0; }
       // plug LED: pulse ring — scale plug emissive via material hack
       if(b.plug){ b.plug.traverse(o=>{ if(o.isMesh&&o.material&&o.material.emissive) o.material.emissiveIntensity = 6+Math.sin(now/120)*4; }); }
     }
@@ -1003,7 +1050,7 @@ function animate(){
       if(b.cshadow) b.cshadow.position.z = b.car.position.z;
       if(b.car.position.z>18){ scene.remove(b.car); b.car=null; if(b.tailRefl){scene.remove(b.tailRefl);b.tailRefl=null;} if(b.headRefl){scene.remove(b.headRefl);b.headRefl=null;} if(b.cshadow){scene.remove(b.cshadow);b.cshadow=null;} b.state='empty';
         if(b.plug){ b.plug.position.copy(b.plugHome.pos); b.plug.rotation.copy(b.plugHome.rot); }
-        grabbedBay = (grabbedBay===b)?null:grabbedBay; docked=false;
+        b.plugged=false; grabbedBay = (grabbedBay===b)?null:grabbedBay; docked=false;
         setTimeout(()=>spawnCar(b), 2500+Math.random()*6000);
       }
     }
@@ -1030,9 +1077,10 @@ function animate(){
   // prompt text
   const t=currentTarget();
   if(grabbedBay && !docked) promptEl.innerHTML='Press <b>E</b> at port to lock', promptEl.classList.add('show');
-  else if(t&&t.type==='charger'&&!grabbedBay) promptEl.innerHTML='Press <b>E</b> — grab connector', promptEl.classList.add('show');
+  else if(t&&t.type==='car'&&t.bay.plugged&&t.bay.state==='charging') promptEl.innerHTML='<b>R</b> pause · <b>E</b> unplug', promptEl.classList.add('show');
+  else if(t&&t.type==='car'&&t.bay.plugged&&t.bay.state==='ready') promptEl.innerHTML='<b>R</b> resume · <b>E</b> unplug', promptEl.classList.add('show');
+  else if(t&&t.type==='charger'&&!grabbedBay&&!t.bay.plugged) promptEl.innerHTML='Press <b>E</b> — grab connector', promptEl.classList.add('show');
   else if(docked&&grabbedBay&&grabbedBay.state!=='charging') promptEl.innerHTML='Press <b>R</b> — energize', promptEl.classList.add('show');
-  else if(docked) promptEl.innerHTML='<b>R</b> stop · <b>E</b> unplug', promptEl.classList.add('show');
   else promptEl.classList.remove('show');
 
   finalPass.uniforms.time.value = now/1000;
@@ -1101,9 +1149,9 @@ window.__GAME = {
   setClock(h){ gameClock=h*60; },
   // ---- soak-test hooks: drive the REAL interaction path ----
   bayState(i){ const b=bays[i]; return {state:b.state, batt:b.car?+b.car.userData.battery.toFixed(3):null, kwh:+(b.chargeKwh||0).toFixed(3), pat:b.car?+((performance.now()-b.car.userData.arrived)/1000).toFixed(1):null}; },
-  grab(i){ if(grabbedBay&&grabbedBay!==bays[i]) return 'busy'; grabbedBay=bays[i]; docked=false; return 'grabbed'; },
-  dock(i){ if(grabbedBay!==bays[i]) return 'notgrabbed'; if(!bays[i].car) return 'nocar'; docked=true; bays[i].car.userData.docked=true; bays[i].state='ready'; return 'docked'; },
-  energize(){ toggleCharge(); return grabbedBay? grabbedBay.state : 'none'; },
+  grab(i){ if(bays[i].plugged) return 'plugged'; if(grabbedBay&&grabbedBay!==bays[i]) return 'busy'; grabbedBay=bays[i]; docked=false; return 'grabbed'; },
+  dock(i){ if(!bays[i].car) return 'nocar'; docked=false; grabbedBay=null; bays[i].plugged=true; bays[i].car.userData.docked=true; bays[i].state='ready'; return 'docked'; },
+  energize(i){ toggleCharge(i); return i!=null? bays[i].state : (grabbedBay? grabbedBay.state : 'none'); },
   econ(){ return {revenue:+revenue.toFixed(2), served, price:+spotPrice.toFixed(4)}; },
   audio(){ return { active: !!(window.__SFXREF && window.__SFXREF.ctx), muted: SFX.muted }; },
 };

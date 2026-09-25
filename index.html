@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>ChargeBay — EV Charging Simulator</title>
 <meta property="og:title" content="ChargeBay — EV Charging Simulator">
 <meta property="og:description" content="Run your own EV fast-charging forecourt. Dynamic spot pricing, rainy dusk, planar wet-road reflections, 350 kW ultrachargers.">
@@ -37,11 +37,11 @@
   #start p{color:#bcd8ea;max-width:460px;text-align:center;line-height:1.5;margin:4px 0;}
   #start button{margin-top:22px;font-size:18px;padding:12px 40px;border-radius:8px;border:1px solid #8fe3ff66;background:#0d2233;color:#dff4ff;cursor:pointer;letter-spacing:.1em;}
   #start button:hover{background:#12344d}
-  body{touch-action:none;}
+  body{touch-action:none;overscroll-behavior:none;} #app,touch-action:none; canvas{touch-action:none;}
   #touchui{position:absolute;inset:0;display:none;pointer-events:none;z-index:10;}
-  #joy{position:absolute;left:26px;bottom:26px;width:120px;height:120px;border-radius:50%;background:rgba(20,40,60,.35);border:1px solid rgba(140,220,255,.35);pointer-events:auto;}
+  #joy{position:absolute;left:26px;bottom:26px;width:120px;height:120px;border-radius:50%;background:rgba(20,40,60,.35);border:1px solid rgba(140,220,255,.35);pointer-events:auto;touch-action:none;}
   #knob{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;background:rgba(140,220,255,.45);border:1px solid rgba(200,240,255,.6);}
-  .tbtn{position:absolute;right:22px;width:74px;height:74px;border-radius:50%;background:rgba(13,34,51,.6);border:1px solid #8fe3ff66;color:#dff4ff;font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;-webkit-user-select:none;}
+  .tbtn{position:absolute;right:22px;width:74px;height:74px;border-radius:50%;background:rgba(13,34,51,.6);border:1px solid #8fe3ff66;color:#dff4ff;font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;-webkit-user-select:none;touch-action:none;}
   #tE{bottom:110px;} #tR{bottom:24px; right:110px;} #tM{bottom:110px; right:110px; width:48px; height:48px; font-size:16px; opacity:.85;}
   @media (pointer:coarse){ #crosshair{opacity:.5;} }
 </style>

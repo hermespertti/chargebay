@@ -27,19 +27,18 @@ let r1=await S('window.__GAME.grab(0)');
 check('grab connector', r1==='grabbed', r1);
 let r2=await S('window.__GAME.dock(0)');
 check('dock connector', r2==='docked', r2);
-let r3=await S('window.__GAME.energize()');
+let r3=await S('window.__GAME.energize(0)');
 check('energize charging', r3==='charging', r3);
 
 // real-raycast interact on bay 1 (place camera in front of charger first)
 await S('(()=>{ window.__GAME.grab(0); return 1; })()'); // ensure bay0 held
 // busy guard: grab another bay while bay0 still held
 let r5=await S('window.__GAME.grab(1)');
-check('busy guard (one connector at a time)', r5==='busy'||r5==='grabbed', r5); // grab(0) again should say not busy-recheck
+check('busy guard (one connector at a time)', r5==='busy'||r5==='grabbed', r5);
 let r6=await S('window.__GAME.grab(0)');
-check('re-grab same bay OK', r6==='grabbed', r6);
+check('re-grab same bay refused once plugged', r6==='plugged', r6);
 
-await S('window.__GAME.dock(0)');
-await S('window.__GAME.energize()'); // charging
+// (bay0 already charging since energize above; dock freed hands)
 // let it charge ~8 s -> battery should rise measurably (0.02/s => +0.16)
 const b0=await S('window.__GAME.bayState(0)');
 await sleep(8000);
@@ -50,13 +49,23 @@ const e1=await S('window.__GAME.econ()');
 check('revenue accruing', e1.revenue>0, JSON.stringify(e1));
 check('grid load shows 350 kW', await S('document.getElementById("load").textContent')==='350 kW', await S('document.getElementById("load").textContent'));
 
+// concurrency: plug in bay 1 while bay 0 charges -> two cars at once
+let g2=await S('window.__GAME.grab(1)');
+let d2=await S('window.__GAME.dock(1)');
+let e3=await S('window.__GAME.energize(1)');
+check('second bay plug+dock+energize', g2==='grabbed'&&d2==='docked'&&e3==='charging', g2+'/'+d2+'/'+e3);
+const two=await S('window.__GAME.bayState(0)').then(a=>S('window.__GAME.bayState(1)').then(b=>({b0:a.state,b1:b.state})));
+check('two cars charging simultaneously', two.b0==='charging'&&two.b1==='charging', JSON.stringify(two));
+await sleep(500); // let animate() update the HUD
+check('grid load shows 700 kW', await S('document.getElementById("load").textContent')==='700 kW', await S('document.getElementById("load").textContent'));
+
 // pause/resume: bay is charging here; one energize = pause, next = resume
-await S('window.__GAME.energize()'); // charging -> ready (pause)
+await S('window.__GAME.energize(0)'); // charging -> ready (pause)
 const p1=await S('window.__GAME.bayState(0)');
 await sleep(2000);
 const p2=await S('window.__GAME.bayState(0)');
 check('pause sets ready + stops charging', p1.state==='ready' && p2.batt-p1.batt<0.005, p1.state+' '+p1.batt+' -> '+p2.batt);
-await S('window.__GAME.energize()'); // ready -> charging (resume)
+await S('window.__GAME.energize(0)'); // ready -> charging (resume)
 const q1=await S('window.__GAME.bayState(0)');
 await sleep(2000);
 const q2=await S('window.__GAME.bayState(0)');
