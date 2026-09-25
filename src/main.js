@@ -644,7 +644,7 @@ function spawnCar(bay, instant=false){
   const car = proto.clone(true);
   car.traverse(o=>{ if(o.isMesh){o.castShadow=true; o.receiveShadow=true;} });
   const roll = 0.08+Math.random()*0.5;
-  car.userData = { battery: roll, need: 0.72+Math.random()*0.25, patience: 90+Math.random()*120, arrived: performance.now() };
+  car.userData = { battery: roll, need: 0.72+Math.random()*0.25, patience: 150+Math.random()*90, arrived: performance.now() };
   car.position.set(bay.x, 0, instant? -3.1 : 16 + Math.random()*6);
   car.rotation.y = Math.PI; // front faces chargers (-Z if model front is +Z we flip after vision check)
   // ground light refs: behind (tail, red) and front (head, warm) — car forward is -Z after rot.y=PI/2
@@ -665,6 +665,7 @@ addEventListener('keyup',e=>keys[e.code]=false);
 
 let ready=false;
 let grabbedBay=null, docked=false;
+const PACK_KWH = 75; // kWh per full charge
 let revenue=0, served=0;
 const clockEl=document.getElementById('clock'), priceEl=document.getElementById('price'),
       revEl=document.getElementById('rev'), servedEl=document.getElementById('served'),
@@ -802,7 +803,8 @@ function tryInteract(){
   if(!t) return;
   const b=t.bay;
   if(grabbedBay===b && docked){ // unplug
-    docked=false; b.state='charging'===b.state?'held':'held';
+    docked=false; b.state='parked';
+    b.car.userData.arrived=performance.now(); // fresh patience so they can re-plug
     b.car.userData.docked=false; toast('🔌 Connector unplugged');
     grabbedBay.plug.position.copy(grabbedBay.plugHome.pos);
     grabbedBay.plug.rotation.copy(grabbedBay.plugHome.rot);
@@ -934,11 +936,12 @@ function animate(){
       if(Math.abs(b.car.position.z-b.driveTo)<0.05){ b.state='parked'; toast('🚗 New arrival — bay '+(BAYS.indexOf(b.x)+1)); }
     }
     if(b.state==='charging' && b.car){
-      const add = 350*dt/3600*10; // game-time accelerate
+      const add = dt*0.02; // fraction of pack per real second (~45 s full charge, game-time compressed)
+      const kwh = add*PACK_KWH;
       b.car.userData.battery=Math.min(1,b.car.userData.battery+add);
-      b.chargeKwh+=350*dt/3600*10;
+      b.chargeKwh=(b.chargeKwh||0)+kwh;
       totalKw+=350;
-      const rev = add*1000*b.price; revenue+=rev; b.sessionRev+=rev;
+      const rev = kwh*b.price; revenue+=rev; b.sessionRev+=rev;
       if(b.car.userData.battery>=1){ b.state='departing'; revenue+=0; toast('🎉 Charge complete +$'+b.sessionRev.toFixed(2)); served++; b.sessionRev=0; }
       // plug LED: pulse ring — scale plug emissive via material hack
       if(b.plug){ b.plug.traverse(o=>{ if(o.isMesh&&o.material&&o.material.emissive) o.material.emissiveIntensity = 6+Math.sin(now/120)*4; }); }
@@ -955,8 +958,8 @@ function animate(){
         setTimeout(()=>spawnCar(b), 2500+Math.random()*6000);
       }
     }
-    // patience: idle parked car leaves
-    if(b.state==='parked' && b.car){
+    // patience: idle parked/held car leaves
+    if((b.state==='parked'||b.state==='ready') && b.car && !b.car.userData.docked){
       const waited=(now-b.car.userData.arrived)/1000;
       if(waited>b.car.userData.patience){ b.state='departing'; toast('😠 Left without charging'); }
     }
@@ -1046,6 +1049,12 @@ window.__GAME = {
   weather(v){ raining=v; },
   serve(){ served+=1; },
   setClock(h){ gameClock=h*60; },
+  // ---- soak-test hooks: drive the REAL interaction path ----
+  bayState(i){ const b=bays[i]; return {state:b.state, batt:b.car?+b.car.userData.battery.toFixed(3):null, kwh:+(b.chargeKwh||0).toFixed(3), pat:b.car?+((performance.now()-b.car.userData.arrived)/1000).toFixed(1):null}; },
+  grab(i){ if(grabbedBay&&grabbedBay!==bays[i]) return 'busy'; grabbedBay=bays[i]; docked=false; return 'grabbed'; },
+  dock(i){ if(grabbedBay!==bays[i]) return 'notgrabbed'; if(!bays[i].car) return 'nocar'; docked=true; bays[i].car.userData.docked=true; bays[i].state='ready'; return 'docked'; },
+  energize(){ toggleCharge(); return grabbedBay? grabbedBay.state : 'none'; },
+  econ(){ return {revenue:+revenue.toFixed(2), served, price:+spotPrice.toFixed(4)}; },
 };
 
 loadAssets().catch(e=>{ console.error('asset load failed', e && e.type, e && e.message); ready=true; if(!envReady) envReady=true; });
