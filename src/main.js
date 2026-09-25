@@ -41,7 +41,7 @@ new RGBELoader().load(HDRI, (hdr)=>{
   scene.environment = env;
   scene.background = env;
   scene.backgroundIntensity = 1.0;
-  if('environmentIntensity' in scene) scene.environmentIntensity = 1.7;
+  if('environmentIntensity' in scene) scene.environmentIntensity = 1.15;
   hdr.dispose(); pmrem.dispose();
   sky.visible = false;
   // force IBL response on all standard materials (incl clearcoat on hero car)
@@ -129,8 +129,8 @@ applyDaylight();
 setTimeout(()=>{ if(!envReady) refreshSkyEnv(); }, 50);
 
 // lights
-const hemi = new THREE.HemisphereLight(0x8a6a7a, 0x2a1c12, 0.45); scene.add(hemi);
-const rake = new THREE.DirectionalLight(0xff8a45, 3.4); rake.position.set(-28, 3.2, -18); rake.castShadow=true; rake.shadow.mapSize.set(2048,2048); rake.shadow.camera.left=-30; rake.shadow.camera.right=30; rake.shadow.camera.top=30; rake.shadow.camera.bottom=-30; rake.shadow.bias=-0.0005; scene.add(rake);
+const hemi = new THREE.HemisphereLight(0x6a5060, 0x241408, 0.28); scene.add(hemi);
+const rake = new THREE.DirectionalLight(0xff7a35, 5.5); rake.position.set(-28, 3.2, -18); rake.castShadow=true; rake.shadow.mapSize.set(2048,2048); rake.shadow.camera.left=-30; rake.shadow.camera.right=30; rake.shadow.camera.top=30; rake.shadow.camera.bottom=-30; rake.shadow.bias=-0.0005; scene.add(rake);
 const sun = new THREE.DirectionalLight(0xff9a4d, 3.2);
 sun.position.set(-30, 9, -14);
 sun.castShadow = true;
@@ -216,12 +216,12 @@ const asphalt = new THREE.Mesh(
     const rg=g.createRadialGradient(0,0,0,0,0,95); rg.addColorStop(0,'rgba(0,0,0,0.68)'); rg.addColorStop(0.6,'rgba(0,0,0,0.45)'); rg.addColorStop(1,'rgba(0,0,0,0)');
     g.fillStyle=rg; g.beginPath(); g.arc(0,0,95,0,Math.PI*2); g.fill(); g.restore();
     const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.ClampToEdgeWrapping; return t; })();
-  return new THREE.MeshStandardMaterial({ map:amap, roughnessMap:rmap, roughness:0.32, normalMap:nmap, normalScale:new THREE.Vector2(0.9,-0.9), metalness:0.25, color:0x596069, envMapIntensity:2.6, alphaMap:wm, transparent:true });
+  return new THREE.MeshStandardMaterial({ map:amap, roughnessMap:rmap, roughness:0.32, normalMap:nmap, normalScale:new THREE.Vector2(0.9,-0.9), metalness:0.25, color:0x6a5c50, envMapIntensity:2.2, alphaMap:wm, transparent:true });
 })()
 );
 asphalt.rotation.x = -Math.PI/2; asphalt.receiveShadow = true; asphalt.renderOrder=1; scene.add(asphalt);
 // dark apron beyond mirror zone so distant ground doesn't read as bright void
-const apron = new THREE.Mesh(new THREE.RingGeometry(14, 480, 64), new THREE.MeshStandardMaterial({ map:(function(){ const tl=new THREE.TextureLoader(); const t=tl.load('assets/ground/col.jpg'); t.colorSpace=THREE.SRGBColorSpace; t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(30,30); return t; })(), color:0x2c3138, roughness:0.6, metalness:0.15, envMapIntensity:1.4 }));
+const apron = new THREE.Mesh(new THREE.RingGeometry(14, 480, 64), new THREE.MeshStandardMaterial({ map:(function(){ const tl=new THREE.TextureLoader(); const t=tl.load('assets/ground/col.jpg'); t.colorSpace=THREE.SRGBColorSpace; t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(30,30); return t; })(), color:0x3a3228, roughness:0.55, metalness:0.2, envMapIntensity:1.6 }));
 apron.rotation.x=-Math.PI/2; apron.position.set(0,0.002,1.5); apron.receiveShadow=true; scene.add(apron);
 
 // painted parking bay lines
@@ -368,9 +368,9 @@ function buildCanopy(){
   const dark  = new THREE.MeshStandardMaterial({color:0x22262e, metalness:0.55, roughness:0.45, envMapIntensity:1.8});
   const solar = new THREE.MeshStandardMaterial({color:0x0a1226, metalness:0.85, roughness:0.15, envMapIntensity:2.2});
   const led = new THREE.MeshStandardMaterial({color:0x14100c, emissive:0xd8a878, emissiveIntensity:0.8});
-  const fill = new THREE.PointLight(0xffd2a8, 26, 26, 1.6); fill.position.set(0,3.8,-3.0); g.add(fill);
-  const fill2 = new THREE.PointLight(0xb8a898, 8, 20, 1.8); fill2.position.set(0,2.2,4.5); g.add(fill2);
-  const ledW = new THREE.MeshStandardMaterial({color:0x0c1410, emissive:0x9fc8b4, emissiveIntensity:0.7});
+  const fill = new THREE.PointLight(0xffb888, 34, 30, 1.7); fill.position.set(0,3.6,-1.0); g.add(fill);
+  const fill2 = new THREE.PointLight(0xffa068, 22, 24, 1.5); fill2.position.set(0,1.6,3.5); g.add(fill2);
+  const ledW = new THREE.MeshStandardMaterial({color:0x140e08, emissive:0xd89050, emissiveIntensity:0.9});
   // roof slab
   const roof = new THREE.Mesh(new THREE.BoxGeometry(20.4,0.28,9.2), dark);
   roof.position.set(0,4.6,-3.0); roof.castShadow=true; g.add(roof);
@@ -402,7 +402,7 @@ function buildCanopy(){
   for(let i=0;i<4;i++){
     const x=-6.6+i*4.4;
     const hous = new THREE.Mesh(new THREE.BoxGeometry(1.6,0.07,0.3), dark); hous.position.set(x,4.44,-3.0); g.add(hous);
-    const lens = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.22), new THREE.MeshStandardMaterial({color:0x101418, emissive:0xffe0b0, emissiveIntensity:2.4})); lens.rotation.x=Math.PI/2; lens.position.set(x,4.4,-3.0); g.add(lens);
+    const lens = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.22), new THREE.MeshStandardMaterial({color:0x101418, emissive:0xffc890, emissiveIntensity:1.5})); lens.rotation.x=Math.PI/2; lens.position.set(x,4.4,-3.0); g.add(lens);
     const emit = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.22), new THREE.MeshBasicMaterial({color:0xc9b69c}));
     emit.rotation.x=Math.PI/2; emit.position.set(x,4.40,-3.0); g.add(emit);
     const sp = new THREE.SpotLight(0xffe3bd, 45, 12, Math.PI/3.4, 0.7, 1.6);
@@ -777,7 +777,7 @@ function contactShadow(w,d,x,z,op){
 
 // ---------------- rain: instanced streaks ----------------
 const rainCount = 4000;
-const dropGeo = new THREE.PlaneGeometry(0.008, 0.34);
+const dropGeo = new THREE.PlaneGeometry(0.006, 0.55);
 const rainMat = new THREE.MeshBasicMaterial({ color:0xcbb8a8, transparent:true, opacity:0.4, depthWrite:false, side:THREE.DoubleSide });
 const rain = new THREE.InstancedMesh(dropGeo, rainMat, rainCount);
 const rdrops = new Float32Array(rainCount*3);
@@ -834,7 +834,7 @@ function animate(){
   // wet shimmer: drift asphalt normal UVs while raining
   if(raining>0.05 && asphalt.material.normalMap){ asphalt.material.normalMap.offset.x=(asphalt.material.normalMap.offset.x+dt*0.004)%1; asphalt.material.normalMap.offset.y=(asphalt.material.normalMap.offset.y+dt*0.006)%1; }
   // rain ripples on mirror zone
-  if(ripples){ ripples.visible=raining>0.05; ripples.material.map.offset.x=(ripples.material.map.offset.x+dt*0.05)%1; ripples.material.map.offset.y=(ripples.material.map.offset.y+dt*0.07)%1; ripples.material.opacity=0.22+raining*0.4; }
+  if(ripples){ ripples.visible=raining>0.05; ripples.material.map.offset.x=(ripples.material.map.offset.x+dt*0.05)%1; ripples.material.map.offset.y=(ripples.material.map.offset.y+dt*0.07)%1; ripples.material.opacity=0.10+raining*0.22; }
   // rain update — streak drop + reinstance
   const fall=(9+raining*11)*dt, wind=raining*2.2*dt;
   for(let i=0;i<rainCount;i++){
@@ -942,9 +942,9 @@ const FinalFX = {
       col *= 1.0 - vign*smoothstep(0.35,0.95, r2*2.2);
       // saturation lift for golden hour
       float lum = dot(col, vec3(0.2126,0.7152,0.0722));
-      col = mix(vec3(lum), col, 1.22);
+      col = mix(vec3(lum), col, 1.10);
       // warm white-balance grade; keep cool in deep shadows
-      vec3 warmGain = vec3(1.14,1.0,0.84);
+      vec3 warmGain = vec3(1.30,1.04,0.72);
       float shadow = 1.0 - smoothstep(0.0,0.35,lum);
       col = mix(col*warmGain, mix(col*warmGain, col*vec3(0.92,0.96,1.10), shadow*0.35), shadow);
       // film grain
