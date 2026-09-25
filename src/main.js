@@ -623,7 +623,8 @@ async function loadAssets(){
   console.log('STAGE propsdone');
   spawnCar(bays[0], true); spawnCar(bays[2], true); spawnCar(bays[1], true);
   ready=true;
-  document.getElementById('start').style.display='none';
+  // NOTE: do NOT auto-hide #start — overlay stays until the player actually
+  // engages (click-lock on desktop, tap on touch). Capture harness hides it itself.
   if(!window.__GAMESPAWN) window.dispatchEvent(new Event('gamespawn'));
 }
 let plugsProto=null;
@@ -683,15 +684,88 @@ function onKey(e){
 
 // controller
 const controls = new PointerLockControls(camera, renderer.domElement);
-document.getElementById('playbtn').addEventListener('click',()=>controls.lock());
-controls.addEventListener('lock', ()=>{ document.getElementById('start').style.display='none'; });
-controls.addEventListener('unlock', ()=>{ if(ready) document.getElementById('start').style.display='flex'; });
+const startEl = document.getElementById('start');
+const touchEl = document.getElementById('touchui');
+const isTouch = matchMedia('(pointer:coarse)').matches || ('ontouchstart' in window && navigator.maxTouchPoints>0);
+let touchMode=false;
+
+function enterTouch(){
+  touchMode=true;
+  startEl.style.display='none';
+  touchEl.style.display='block';
+}
+document.getElementById('playbtn').addEventListener('click',()=>{ if(isTouch) enterTouch(); else controls.lock(); });
+startEl.addEventListener('click',(e)=>{ if(!isTouch && e.target.id!=='playbtn') controls.lock(); });
+controls.addEventListener('lock', ()=>{ startEl.style.display='none'; });
+controls.addEventListener('unlock', ()=>{ if(ready && !isTouch && !touchMode) startEl.style.display='flex'; });
+// desktop: clicking the game view re-locks the mouse (fixes "mouse never locked")
+renderer.domElement.addEventListener('click',()=>{ if(ready && !isTouch && controls.isLocked===false) controls.lock(); });
+
+// ---- touch controls: left stick = move, right-drag = look, buttons = E / ⚡ ----
+let tF=0, tS=0, stickId=null, lookId=null, lastLX=0, lastLY=0;
+const stickEl=document.getElementById('joy'), knobEl=document.getElementById('knob');
+if(isTouch){
+  const R=48;
+  const startEvt = window.PointerEvent? 'pointerdown':'touchstart';
+  stickEl.addEventListener(startEvt,(ev)=>{
+    const t = ev.pointerId!==undefined? ev : ev.changedTouches[0];
+    stickId = t.pointerId!==undefined? t.pointerId : t.identifier;
+    const r=stickEl.getBoundingClientRect();
+    moveStick(t.clientX-(r.left+r.width/2), t.clientY-(r.top+r.height/2));
+    ev.preventDefault();
+  });
+  function moveStick(dx,dy){
+    const d=Math.min(1, Math.hypot(dx,dy)/R);
+    const a=Math.atan2(dy,dx);
+    tF=-Math.sin(a)*d; tS=Math.cos(a)*d;
+    knobEl.style.transform=`translate(${Math.cos(a)*d*R}px,${Math.sin(a)*d*R}px)`;
+  }
+  document.addEventListener(startEvt==='pointerdown'?'pointermove':'touchmove',(ev)=>{
+    const list = ev.changedTouches? [ ...ev.changedTouches ] : [ev];
+    for(const t of list){
+      const id = t.pointerId!==undefined? t.pointerId : t.identifier;
+      if(id===stickId){
+        const r=stickEl.getBoundingClientRect();
+        moveStick(t.clientX-(r.left+r.width/2), t.clientY-(r.top+r.height/2));
+      } else if(id===lookId){
+        const dx=t.clientX-lastLX, dy=t.clientY-lastLY;
+        lastLX=t.clientX; lastLY=t.clientY;
+        const e=new THREE.Euler().setFromQuaternion(camera.quaternion,'YXZ');
+        e.y-=dx*0.005; e.x-=dy*0.005; e.x=Math.max(-1.4,Math.min(1.4,e.x));
+        camera.quaternion.setFromEuler(e);
+      }
+    }
+    if(ev.cancelable) ev.preventDefault();
+  },{passive:false});
+  document.addEventListener(startEvt==='pointerdown'?'pointerup':'touchend',(ev)=>{
+    const list = ev.changedTouches? [ ...ev.changedTouches ] : [ev];
+    for(const t of list){
+      const id = t.pointerId!==undefined? t.pointerId : t.identifier;
+      if(id===stickId){ stickId=null; tF=0; tS=0; knobEl.style.transform=''; }
+      if(id===lookId) lookId=null;
+    }
+  });
+  document.addEventListener(startEvt==='pointerdown'?'pointerdown':'touchstart',(ev)=>{
+    const t = ev.pointerId!==undefined? ev : ev.changedTouches[0];
+    // drags on the right 60% of screen (not on a button/stick) = look
+    if(stickId!==null) return;
+    const tgt=ev.target;
+    if(tgt && (tgt.closest('#joy')||tgt.closest('.tbtn')||tgt.closest('#start'))) return;
+    const r=window.innerWidth;
+    if(t.clientX > r*0.35){
+      lookId = t.pointerId!==undefined? t.pointerId : t.identifier;
+      lastLX=t.clientX; lastLY=t.clientY;
+    }
+  });
+  document.getElementById('tE').addEventListener(startEvt==='pointerdown'?'pointerdown':'touchstart',(ev)=>{ ev.preventDefault(); if(ready) tryInteract(); });
+  document.getElementById('tR').addEventListener(startEvt==='pointerdown'?'pointerdown':'touchstart',(ev)=>{ ev.preventDefault(); if(ready) toggleCharge(); });
+}
 
 let vy=0, bob=0;
 function updatePlayer(dt){
-  const speed=(keys['ShiftLeft']?4.6:2.4);
-  const f=(keys['KeyW']?1:0)-(keys['KeyS']?1:0);
-  const s=(keys['KeyD']?1:0)-(keys['KeyA']?1:0);
+  const speed=(keys['ShiftLeft']?4.6:2.4)*(touchMode?1.2:1);
+  const f=(keys['KeyW']?1:0)-(keys['KeyS']?1:0)+(touchMode?tF:0);
+  const s=(keys['KeyD']?1:0)-(keys['KeyA']?1:0)+(touchMode?tS:0);
   const dir=new THREE.Vector3();
   camera.getWorldDirection(dir); dir.y=0; dir.normalize();
   const right=new THREE.Vector3().crossVectors(dir,new THREE.Vector3(0,1,0));

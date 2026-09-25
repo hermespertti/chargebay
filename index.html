@@ -36,6 +36,13 @@
   #start p{color:#bcd8ea;max-width:460px;text-align:center;line-height:1.5;margin:4px 0;}
   #start button{margin-top:22px;font-size:18px;padding:12px 40px;border-radius:8px;border:1px solid #8fe3ff66;background:#0d2233;color:#dff4ff;cursor:pointer;letter-spacing:.1em;}
   #start button:hover{background:#12344d}
+  body{touch-action:none;}
+  #touchui{position:absolute;inset:0;display:none;pointer-events:none;z-index:10;}
+  #joy{position:absolute;left:26px;bottom:26px;width:120px;height:120px;border-radius:50%;background:rgba(20,40,60,.35);border:1px solid rgba(140,220,255,.35);pointer-events:auto;}
+  #knob{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;background:rgba(140,220,255,.45);border:1px solid rgba(200,240,255,.6);}
+  .tbtn{position:absolute;right:22px;width:74px;height:74px;border-radius:50%;background:rgba(13,34,51,.6);border:1px solid #8fe3ff66;color:#dff4ff;font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;-webkit-user-select:none;}
+  #tE{bottom:110px;} #tR{bottom:24px; right:110px;}
+  @media (pointer:coarse){ #crosshair{opacity:.5;} }
 </style>
 </head>
 <body>
@@ -53,6 +60,11 @@
   <div id="prompt">Press <b>E</b></div>
   <div id="crosshair"></div>
   <div id="toast"></div>
+  <div id="touchui">
+    <div id="joy"><div id="knob"></div></div>
+    <div class="tbtn" id="tE">E</div>
+    <div class="tbtn" id="tR">⚡</div>
+  </div>
   <div id="start">
     <h1>⚡ CHARGEBAY</h1>
     <p>Dusk. Rain's coming. Pull up, grab the connector, and get these cars charged.</p>
