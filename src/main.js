@@ -130,7 +130,7 @@ setTimeout(()=>{ if(!envReady) refreshSkyEnv(); }, 50);
 
 // lights
 const hemi = new THREE.HemisphereLight(0x6a5060, 0x241408, 0.28); scene.add(hemi);
-const rake = new THREE.DirectionalLight(0xff7a35, 5.5); rake.position.set(-28, 3.2, -18); rake.castShadow=true; rake.shadow.mapSize.set(2048,2048); rake.shadow.camera.left=-30; rake.shadow.camera.right=30; rake.shadow.camera.top=30; rake.shadow.camera.bottom=-30; rake.shadow.bias=-0.0005; scene.add(rake);
+const rake = new THREE.DirectionalLight(0xff7a35, 4.6); rake.position.set(-22, 4.0, 16); rake.castShadow=true; rake.shadow.mapSize.set(2048,2048); rake.shadow.camera.left=-30; rake.shadow.camera.right=30; rake.shadow.camera.top=30; rake.shadow.camera.bottom=-30; rake.shadow.bias=-0.0005; scene.add(rake);
 const sun = new THREE.DirectionalLight(0xff9a4d, 3.2);
 sun.position.set(-30, 9, -14);
 sun.castShadow = true;
@@ -306,7 +306,7 @@ const rippleTex=(()=>{ const c=document.createElement('canvas'); c.width=c.heigh
     grd.addColorStop(0,'rgba(255,255,255,0)'); grd.addColorStop(0.75,'rgba(255,255,255,0.16)'); grd.addColorStop(1,'rgba(255,255,255,0)');
     g.fillStyle=grd; g.beginPath(); g.arc(x,y,r,0,Math.PI*2); g.fill(); }
   const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(3.5,3); return t; })();
-const ripples=new THREE.Mesh(new THREE.PlaneGeometry(46,34), new THREE.MeshBasicMaterial({map:rippleTex,transparent:true,opacity:0.35,blending:THREE.AdditiveBlending,depthWrite:false}));
+const ripples=new THREE.Mesh(new THREE.PlaneGeometry(46,34), new THREE.MeshBasicMaterial({map:rippleTex,transparent:true,opacity:0.22,blending:THREE.AdditiveBlending,depthWrite:false}));
 ripples.rotation.x=-Math.PI/2; ripples.position.set(0,0.006,1.5); ripples.renderOrder=2; scene.add(ripples);
 
 const mirror = new Reflector(new THREE.PlaneGeometry(46,34), {
@@ -525,7 +525,7 @@ function loadGLB(path){ return new Promise((res,rej)=>{ const to=setTimeout(()=>
 let chargerProto=null, carProtos=[];
 const bays = BAYS.map(x=>({ x, charger:null, car:null, state:'empty', plug:null, plugHome:null, chargeKwh:0, sessionRev:0, price:0.124 }));
 
-const PAINTS = [0x0a2e6b, 0xd8dadf, 0x8f0f14, 0x1c2026, 0x0f4d3a, 0x6b6e73];
+const PAINTS = [0x0a2e6b, 0xe8dcc8, 0x8f0f14, 0x1c2026, 0x0f4d3a, 0x6b6e73];
 function orientCar(obj){
   // rotate so longest horizontal axis = Z, center at origin, wheels on y=0
   obj.rotation.set(0,0,0);
