@@ -26,9 +26,7 @@ check('cars present at start', s0.batt!==null && s0.state!=='empty', JSON.string
 let r1=await S('window.__GAME.grab(0)');
 check('grab connector', r1==='grabbed', r1);
 let r2=await S('window.__GAME.dock(0)');
-check('dock connector', r2==='docked', r2);
-let r3=await S('window.__GAME.energize(0)');
-check('energize charging', r3==='charging', r3);
+check('dock connector auto-starts charging', r2==='charging', r2);
 
 // real-raycast interact on bay 1 (place camera in front of charger first)
 await S('(()=>{ window.__GAME.grab(0); return 1; })()'); // ensure bay0 held
@@ -53,14 +51,14 @@ check('grid load shows 150 kW', await S('document.getElementById("load").textCon
 let g2=await S('window.__GAME.grab(1)');
 let d2=await S('window.__GAME.dock(1)');
 let e3=await S('window.__GAME.energize(1)');
-check('second bay plug+dock+energize', g2==='grabbed'&&d2==='docked'&&e3==='charging', g2+'/'+d2+'/'+e3);
+check('second bay plug+dock auto-charge', g2==='grabbed'&&d2==='charging'&&e3==='charging', g2+'/'+d2+'/'+e3);
 const two=await S('window.__GAME.bayState(0)').then(a=>S('window.__GAME.bayState(1)').then(b=>({b0:a.state,b1:b.state})));
 check('two cars charging simultaneously', two.b0==='charging'&&two.b1==='charging', JSON.stringify(two));
 await sleep(500); // let animate() update the HUD
 check('grid load shows 300 kW', await S('document.getElementById("load").textContent')==='300 kW', await S('document.getElementById("load").textContent'));
 
-// pause/resume: bay is charging here; one energize = pause, next = resume
-await S('window.__GAME.energize(0)'); // charging -> ready (pause)
+// pause/resume: bay is charging here; pause() halts, energize() resumes
+await S('window.__GAME.pause(0)'); // charging -> ready (pause)
 const p1=await S('window.__GAME.bayState(0)');
 await sleep(2000);
 const p2=await S('window.__GAME.bayState(0)');
