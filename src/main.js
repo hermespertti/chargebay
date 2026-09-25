@@ -30,15 +30,18 @@ const DAY = { t: 0.78 }; // 0..1, dusk ~0.75-0.82
 
 // PMREM env for PBR reflections
 let envReady=false;
-const HDRI = localStorage.getItem('cb_hdri') || 'assets/hdri/dusk2.hdr';
+const HDRI = localStorage.getItem('cb_hdri') || 'assets/hdri/venice_sunset.hdr';
 new RGBELoader().load(HDRI, (hdr)=>{
   const pmrem = new THREE.PMREMGenerator(renderer);
   pmrem.compileEquirectangularShader();
+  hdr.wrapS = THREE.RepeatWrapping; hdr.wrapT = THREE.ClampToEdgeWrapping;
+  hdr.offset.y = parseFloat(localStorage.getItem('cb_hdri_v')||'-0.12');   // drop sun toward horizon
+  hdr.offset.x = parseFloat(localStorage.getItem('cb_hdri_u')||'0.0');
   const env = pmrem.fromEquirectangular(hdr).texture;
   scene.environment = env;
   scene.background = env;
   scene.backgroundIntensity = 1.0;
-  if('environmentIntensity' in scene) scene.environmentIntensity = 1.1;
+  if('environmentIntensity' in scene) scene.environmentIntensity = 1.7;
   hdr.dispose(); pmrem.dispose();
   sky.visible = false;
   // force IBL response on all standard materials (incl clearcoat on hero car)
@@ -97,6 +100,17 @@ function makeSky() {
   return new THREE.Mesh(geo, mat);
 }
 const sky = makeSky(); scene.add(sky);
+// warm horizon scattering dome overlay (additive) to push HDRI dusk warmth
+const horizonGlow = new THREE.Mesh(new THREE.SphereGeometry(290,32,16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, transparent:true, depthWrite:false, blending: THREE.AdditiveBlending,
+  uniforms:{}, vertexShader:`varying vec3 vP; void main(){ vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+  fragmentShader:`varying vec3 vP; void main(){ float h=normalize(vP).y;
+    float band = exp(-abs(h)*4.2);                    // broader horizon band
+    float low  = exp(-max(h,0.0)*2.2);               // broad lower glow
+    vec3 warm = vec3(0.85,0.44,0.20)*band*0.55 + vec3(0.72,0.36,0.22)*low*0.20;
+    float dt = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233)))*43758.5453);
+    gl_FragColor = vec4(warm + (dt-0.5)/255.0*2.0, 1.0); }`
+})); horizonGlow.renderOrder = -1; scene.add(horizonGlow);
 function applyDaylight(){
   // dusk palette
   const t = DAY.t;
@@ -108,15 +122,15 @@ function applyDaylight(){
   u.topCol.value.copy(top); u.midCol.value.copy(mid); u.botCol.value.copy(bot);
   u.sunCol.value.copy(sun);
   u.sunDir.value.set(-0.85, 0.06, -0.5).normalize();
-  fog.color.setHSL(0.72, 0.30, 0.22);
+  fog.color.setHSL(0.075, 0.38, 0.30);
   renderer.toneMappingExposure = 0.85;
 }
 applyDaylight();
 setTimeout(()=>{ if(!envReady) refreshSkyEnv(); }, 50);
 
 // lights
-const hemi = new THREE.HemisphereLight(0x38456b, 0x241b12, 0.55); scene.add(hemi);
-const rake = new THREE.DirectionalLight(0xff9a55, 2.6); rake.position.set(-28, 3.2, -18); scene.add(rake);
+const hemi = new THREE.HemisphereLight(0x8a6a7a, 0x2a1c12, 0.45); scene.add(hemi);
+const rake = new THREE.DirectionalLight(0xff8a45, 3.4); rake.position.set(-28, 3.2, -18); rake.castShadow=true; rake.shadow.mapSize.set(2048,2048); rake.shadow.camera.left=-30; rake.shadow.camera.right=30; rake.shadow.camera.top=30; rake.shadow.camera.bottom=-30; rake.shadow.bias=-0.0005; scene.add(rake);
 const sun = new THREE.DirectionalLight(0xff9a4d, 3.2);
 sun.position.set(-30, 9, -14);
 sun.castShadow = true;
@@ -198,14 +212,17 @@ const asphalt = new THREE.Mesh(
   const nmap=tl.load('assets/ground/nrm.jpg'); nmap.wrapS=nmap.wrapT=THREE.RepeatWrapping; nmap.repeat.set(22,22); nmap.anisotropy=Math.max(8,MAXA);
   const wm=(()=>{ const c=document.createElement('canvas'); c.width=c.height=1024; const g=c.getContext('2d');
     g.fillStyle='#ffffff'; g.fillRect(0,0,1024,1024); g.filter='blur(26px)';
-    g.save(); g.translate(512,512); g.scale(1.35,1.0);
-    const rg=g.createRadialGradient(0,0,0,0,0,95); rg.addColorStop(0,'rgba(0,0,0,0.92)'); rg.addColorStop(0.6,'rgba(0,0,0,0.7)'); rg.addColorStop(1,'rgba(0,0,0,0)');
+    g.save(); g.translate(512,600); g.scale(1.5,1.25);
+    const rg=g.createRadialGradient(0,0,0,0,0,95); rg.addColorStop(0,'rgba(0,0,0,0.68)'); rg.addColorStop(0.6,'rgba(0,0,0,0.45)'); rg.addColorStop(1,'rgba(0,0,0,0)');
     g.fillStyle=rg; g.beginPath(); g.arc(0,0,95,0,Math.PI*2); g.fill(); g.restore();
     const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.ClampToEdgeWrapping; return t; })();
-  return new THREE.MeshStandardMaterial({ map:amap, roughnessMap:rmap, roughness:0.38, normalMap:nmap, normalScale:new THREE.Vector2(0.8,-0.8), metalness:0.2, color:0x6b727c, envMapIntensity:2.2, alphaMap:wm, transparent:true });
+  return new THREE.MeshStandardMaterial({ map:amap, roughnessMap:rmap, roughness:0.32, normalMap:nmap, normalScale:new THREE.Vector2(0.9,-0.9), metalness:0.25, color:0x596069, envMapIntensity:2.6, alphaMap:wm, transparent:true });
 })()
 );
 asphalt.rotation.x = -Math.PI/2; asphalt.receiveShadow = true; asphalt.renderOrder=1; scene.add(asphalt);
+// dark apron beyond mirror zone so distant ground doesn't read as bright void
+const apron = new THREE.Mesh(new THREE.RingGeometry(14, 480, 64), new THREE.MeshStandardMaterial({ map:(function(){ const tl=new THREE.TextureLoader(); const t=tl.load('assets/ground/col.jpg'); t.colorSpace=THREE.SRGBColorSpace; t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(30,30); return t; })(), color:0x2c3138, roughness:0.6, metalness:0.15, envMapIntensity:1.4 }));
+apron.rotation.x=-Math.PI/2; apron.position.set(0,0.002,1.5); apron.receiveShadow=true; scene.add(apron);
 
 // painted parking bay lines
 function bayLines(){
@@ -281,8 +298,19 @@ const streaks = new THREE.Group();
 }
 scene.add(streaks);
 
+// rain ripple overlay on wet mirror zone: animated radial-ring normal illusion via scrolling alpha
+const rippleTex=(()=>{ const c=document.createElement('canvas'); c.width=c.height=512; const g=c.getContext('2d');
+  g.clearRect(0,0,512,512);
+  for(let i=0;i<260;i++){ const x=Math.random()*512,y=Math.random()*512,r=3+Math.random()*22;
+    const grd=g.createRadialGradient(x,y,r*0.4,x,y,r);
+    grd.addColorStop(0,'rgba(255,255,255,0)'); grd.addColorStop(0.75,'rgba(255,255,255,0.16)'); grd.addColorStop(1,'rgba(255,255,255,0)');
+    g.fillStyle=grd; g.beginPath(); g.arc(x,y,r,0,Math.PI*2); g.fill(); }
+  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(3.5,3); return t; })();
+const ripples=new THREE.Mesh(new THREE.PlaneGeometry(46,34), new THREE.MeshBasicMaterial({map:rippleTex,transparent:true,opacity:0.35,blending:THREE.AdditiveBlending,depthWrite:false}));
+ripples.rotation.x=-Math.PI/2; ripples.position.set(0,0.006,1.5); ripples.renderOrder=2; scene.add(ripples);
+
 const mirror = new Reflector(new THREE.PlaneGeometry(46,34), {
-  clipBias: 0.004, textureWidth: 1024, textureHeight: 1024, color: 0x2a2f38
+  clipBias: 0.004, textureWidth: 1024, textureHeight: 1024, color: 0x4a4239
 });
 mirror.rotation.x=-Math.PI/2; mirror.position.set(0,-0.002,1.5); mirror.renderOrder=0;
 mirror.visible=true; scene.add(mirror);
@@ -339,9 +367,9 @@ function buildCanopy(){
   const steel = new THREE.MeshStandardMaterial({color:0x363a42, metalness:0.9, roughness:0.32, envMapIntensity:2.0});
   const dark  = new THREE.MeshStandardMaterial({color:0x22262e, metalness:0.55, roughness:0.45, envMapIntensity:1.8});
   const solar = new THREE.MeshStandardMaterial({color:0x0a1226, metalness:0.85, roughness:0.15, envMapIntensity:2.2});
-  const led = new THREE.MeshStandardMaterial({color:0x0a141c, emissive:0x86b8d8, emissiveIntensity:0.65});
+  const led = new THREE.MeshStandardMaterial({color:0x14100c, emissive:0xd8a878, emissiveIntensity:0.8});
   const fill = new THREE.PointLight(0xffd2a8, 26, 26, 1.6); fill.position.set(0,3.8,-3.0); g.add(fill);
-  const fill2 = new THREE.PointLight(0x9ab8d8, 10, 20, 1.8); fill2.position.set(0,2.2,4.5); g.add(fill2);
+  const fill2 = new THREE.PointLight(0xb8a898, 8, 20, 1.8); fill2.position.set(0,2.2,4.5); g.add(fill2);
   const ledW = new THREE.MeshStandardMaterial({color:0x0c1410, emissive:0x9fc8b4, emissiveIntensity:0.7});
   // roof slab
   const roof = new THREE.Mesh(new THREE.BoxGeometry(20.4,0.28,9.2), dark);
@@ -374,7 +402,7 @@ function buildCanopy(){
   for(let i=0;i<4;i++){
     const x=-6.6+i*4.4;
     const hous = new THREE.Mesh(new THREE.BoxGeometry(1.6,0.07,0.3), dark); hous.position.set(x,4.44,-3.0); g.add(hous);
-    const lens = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.22), new THREE.MeshStandardMaterial({color:0x101418, emissive:0xffecd0, emissiveIntensity:6.0})); lens.rotation.x=Math.PI/2; lens.position.set(x,4.4,-3.0); g.add(lens);
+    const lens = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.22), new THREE.MeshStandardMaterial({color:0x101418, emissive:0xffe0b0, emissiveIntensity:2.4})); lens.rotation.x=Math.PI/2; lens.position.set(x,4.4,-3.0); g.add(lens);
     const emit = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.22), new THREE.MeshBasicMaterial({color:0xc9b69c}));
     emit.rotation.x=Math.PI/2; emit.position.set(x,4.40,-3.0); g.add(emit);
     const sp = new THREE.SpotLight(0xffe3bd, 45, 12, Math.PI/3.4, 0.7, 1.6);
@@ -424,7 +452,7 @@ function facadeTex(){
   const g=c.getContext('2d');
   g.fillStyle='#0b0e14'; g.fillRect(0,0,256,256);
   for(let y=8;y<248;y+=16) for(let x=8;x<248;x+=16){
-    if(Math.random()<0.34){
+    if(Math.random()<0.5){
       const warm=Math.random();
       g.fillStyle= warm>0.5? 'rgba(255,190,110,'+(0.5+Math.random()*0.5)+')' : 'rgba(160,200,255,'+(0.3+Math.random()*0.4)+')';
     } else g.fillStyle='rgba(30,34,44,0.9)';
@@ -439,7 +467,8 @@ function backdrop(){
     const a=Math.random()*Math.PI*2, r=70+Math.random()*110;
     const h=6+Math.random()*38, w=6+Math.random()*14;
     const tex = ft.clone(); tex.needsUpdate=true; tex.repeat.set(Math.max(1,Math.round(w/4)), Math.max(1,Math.round(h/6)));
-    const bmat=new THREE.MeshStandardMaterial({map:tex, color:0x333a46, roughness:0.85, metalness:0.1, emissiveMap: Math.random()<0.8?tex:null, emissive:0xffc880, emissiveIntensity:0.35});
+    const warm=[0x8a7f70,0x77685c,0x948a7c,0x6b5f54][i%4];
+    const bmat=new THREE.MeshStandardMaterial({map:tex, color:warm, roughness:0.85, metalness:0.05, emissiveMap: tex, emissive:0xffb878, emissiveIntensity:0.55});
     const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,8+Math.random()*10), bmat);
     b.position.set(Math.cos(a)*r, h/2, Math.sin(a)*r); b.rotation.y=Math.random()*Math.PI; g.add(b);
   }
@@ -749,7 +778,7 @@ function contactShadow(w,d,x,z,op){
 // ---------------- rain: instanced streaks ----------------
 const rainCount = 4000;
 const dropGeo = new THREE.PlaneGeometry(0.008, 0.34);
-const rainMat = new THREE.MeshBasicMaterial({ color:0xa8c2dc, transparent:true, opacity:0.5, depthWrite:false, side:THREE.DoubleSide });
+const rainMat = new THREE.MeshBasicMaterial({ color:0xcbb8a8, transparent:true, opacity:0.4, depthWrite:false, side:THREE.DoubleSide });
 const rain = new THREE.InstancedMesh(dropGeo, rainMat, rainCount);
 const rdrops = new Float32Array(rainCount*3);
 const dummy = new THREE.Object3D();
@@ -804,6 +833,8 @@ function animate(){
 
   // wet shimmer: drift asphalt normal UVs while raining
   if(raining>0.05 && asphalt.material.normalMap){ asphalt.material.normalMap.offset.x=(asphalt.material.normalMap.offset.x+dt*0.004)%1; asphalt.material.normalMap.offset.y=(asphalt.material.normalMap.offset.y+dt*0.006)%1; }
+  // rain ripples on mirror zone
+  if(ripples){ ripples.visible=raining>0.05; ripples.material.map.offset.x=(ripples.material.map.offset.x+dt*0.05)%1; ripples.material.map.offset.y=(ripples.material.map.offset.y+dt*0.07)%1; ripples.material.opacity=0.22+raining*0.4; }
   // rain update — streak drop + reinstance
   const fall=(9+raining*11)*dt, wind=raining*2.2*dt;
   for(let i=0;i<rainCount;i++){
@@ -909,6 +940,13 @@ const FinalFX = {
       col.b = texture2D(tDiffuse, uv - cc*aberr*1.0).b;
       // vignette
       col *= 1.0 - vign*smoothstep(0.35,0.95, r2*2.2);
+      // saturation lift for golden hour
+      float lum = dot(col, vec3(0.2126,0.7152,0.0722));
+      col = mix(vec3(lum), col, 1.22);
+      // warm white-balance grade; keep cool in deep shadows
+      vec3 warmGain = vec3(1.14,1.0,0.84);
+      float shadow = 1.0 - smoothstep(0.0,0.35,lum);
+      col = mix(col*warmGain, mix(col*warmGain, col*vec3(0.92,0.96,1.10), shadow*0.35), shadow);
       // film grain
       float g = rand(uv*vec2(1920.,1080.)+time)*2.0-1.0;
       col += g*grain*(1.0-length(cc));
