@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { GLTFLoader } from 'three/addons/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { Reflector } from 'three/addons/objects/Reflector.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -44,6 +45,7 @@ new RGBELoader().load(HDRI, (hdr)=>{
   if('environmentIntensity' in scene) scene.environmentIntensity = 1.15;
   hdr.dispose(); pmrem.dispose();
   sky.visible = false;
+  hdriBG = true;
   // force IBL response on all standard materials (incl clearcoat on hero car)
   scene.traverse(o=>{
     if(o.isMesh && o.material){
@@ -64,6 +66,7 @@ function refreshSkyEnv(){
 }
 
 // ---------------- fog & sky ----------------
+let hdriBG = false;
 const fog = new THREE.FogExp2(0x3a3048, 0.006);
 scene.fog = fog;
 
@@ -111,21 +114,65 @@ const horizonGlow = new THREE.Mesh(new THREE.SphereGeometry(290,32,16), new THRE
     float dt = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233)))*43758.5453);
     gl_FragColor = vec4(warm + (dt-0.5)/255.0*2.0, 1.0); }`
 })); horizonGlow.renderOrder = -1; scene.add(horizonGlow);
-function applyDaylight(){
-  // dusk palette
-  const t = DAY.t;
-  const top = new THREE.Color().setHSL(0.64, 0.52, 0.26 + 0.06*(1-t));
-  const mid = new THREE.Color().setHSL(0.70, 0.48, 0.34);
-  const bot = new THREE.Color().setHSL(0.07, 0.88, 0.42);
-  const sun = new THREE.Color().setHSL(0.06, 0.95, 0.72);
+// ---- day/night cycle: drives sun, sky, fog, exposure, HDRI blend, fixtures ----
+let nightK = 1;              // 0=full day, 1=deep night
+let bloomPass = null;        // set once composer exists
+const nightFixtures = [];
+const sunPath = new THREE.Vector3();
+const cTop=new THREE.Color(), cMid=new THREE.Color(), cBot=new THREE.Color(), cSun=new THREE.Color(), cFog=new THREE.Color();
+function hDay(a,b,k,out){ out.copy(a).lerp(b,k); return out; }
+const DAY_TOP=new THREE.Color(0x2f6fd0), DAY_MID=new THREE.Color(0x9cc4ea), DAY_BOT=new THREE.Color(0xefe6d2), DAY_SUN=new THREE.Color(0xfff8e2);
+const DUSK_TOP=new THREE.Color(0x2c2650), DUSK_MID=new THREE.Color(0x6a4a72), DUSK_BOT=new THREE.Color(0xe0783c), DUSK_SUN=new THREE.Color(0xff8a3a);
+const NIGHT_TOP=new THREE.Color(0x05070f), NIGHT_MID=new THREE.Color(0x0b1020), NIGHT_BOT=new THREE.Color(0x1a1430), NIGHT_SUN=new THREE.Color(0x9db4ff);
+function applyDaylight(min){
+  if(min==null) min = 18*60+42;
+  const t = ((min/1440)*Math.PI*2) - Math.PI/2; // noon=apex, midnight=floor
+  const elev = Math.sin(t)*0.62;
+  const az = Math.cos(t);
+  sunPath.set(az, Math.max(elev, 0.02), -0.55).normalize();
+  // bands: nightAmt 1 at deep night, dayAmt 1 in daylight, dusk between
+  const dayAmt  = THREE.MathUtils.smoothstep(elev, 0.04, 0.45);
+  const nightAmt = 1 - THREE.MathUtils.smoothstep(elev, -0.30, 0.10);
+  nightK = nightAmt;
+  // sky: NIGHT -> DUSK -> DAY two-band blend
+  hDay(DUSK_TOP, DAY_TOP, dayAmt, cTop);     hDay(cTop, NIGHT_TOP, nightAmt, cTop);
+  hDay(DUSK_MID, DAY_MID, dayAmt, cMid);     hDay(cMid, NIGHT_MID, nightAmt, cMid);
+  hDay(DUSK_BOT, DAY_BOT, dayAmt, cBot);     hDay(cBot, NIGHT_BOT, nightAmt, cBot);
+  hDay(DUSK_SUN, DAY_SUN, THREE.MathUtils.smoothstep(elev,0.05,0.35), cSun);
+  if(nightAmt>0) hDay(cSun, NIGHT_SUN, nightAmt, cSun);
   const u = sky.material.uniforms;
-  u.topCol.value.copy(top); u.midCol.value.copy(mid); u.botCol.value.copy(bot);
-  u.sunCol.value.copy(sun);
-  u.sunDir.value.set(-0.85, 0.06, -0.5).normalize();
-  fog.color.setHSL(0.075, 0.38, 0.30);
-  renderer.toneMappingExposure = 0.85;
+  u.topCol.value.copy(cTop); u.midCol.value.copy(cMid); u.botCol.value.copy(cBot);
+  u.sunCol.value.copy(cSun); u.sunDir.value.copy(sunPath);
+  // fog follows sky bottom hue
+  cFog.copy(cBot).lerp(cMid, 0.5); fog.color.copy(cFog);
+  // sun lights along the path
+  sun.color.copy(cSun); sun.intensity = 0.5 + dayAmt*5.0 + (1-nightAmt)*(1-dayAmt)*4.0;
+  sun.position.set(sunPath.x*40, Math.max(sunPath.y*40, 3), sunPath.z*40);
+  rake.color.copy(cSun); rake.intensity = 0.3 + dayAmt*2.6 + (1-nightAmt)*(1-dayAmt)*3.4;
+  rake.position.set(sunPath.z*-24, 4.0, sunPath.x*-24);
+  hemi.intensity = 0.08 + dayAmt*0.8 + (1-nightAmt)*(1-dayAmt)*0.24;
+  hemi.color.copy(cMid);
+  renderer.toneMappingExposure = 0.82 + dayAmt*0.6 + nightAmt*0.12;
+  // HDRI blend: day brightens env, night deepens it
+  scene.backgroundIntensity = 0.28 + (1-nightAmt)*0.95;
+  if('environmentIntensity' in scene) scene.environmentIntensity = 0.18 + (1-nightAmt)*1.4;
+  // day: bright procedural dome covers the dusk HDRI; dusk/night: HDRI sky shows
+  sky.visible = !hdriBG || dayAmt > 0.45;
+  horizonGlow.material.opacity = Math.max(0.06, (1-nightAmt)*(1-dayAmt)*0.85 + nightAmt*0.10);
+  if(bloomPass) bloomPass.strength = 0.10 + nightAmt*0.5;
+  // fixtures: lights glow as darkness rises
+  const fx = 0.12 + nightAmt*0.88;
+  for(const m of nightFixtures){ m.emissiveIntensity = m.userData.baseEI*fx; }
 }
-applyDaylight();
+function collectNightLights(){
+  nightFixtures.length=0;
+  scene.traverse(o=>{
+    if(o.isMesh && o.material){
+      const ms=Array.isArray(o.material)?o.material:[o.material];
+      for(const m of ms){ if(m.isMeshStandardMaterial && m.emissive && m.emissiveIntensity>0 && m.userData.baseEI===undefined){ m.userData.baseEI=m.emissiveIntensity; nightFixtures.push(m); } }
+    }
+  });
+}
 setTimeout(()=>{ if(!envReady) refreshSkyEnv(); }, 50);
 
 // lights
@@ -138,7 +185,7 @@ sun.shadow.mapSize.set(2048,2048);
 sun.shadow.camera.left=-30; sun.shadow.camera.right=30; sun.shadow.camera.top=30; sun.shadow.camera.bottom=-30;
 sun.shadow.camera.near=1; sun.shadow.camera.far=120; sun.shadow.bias=-0.0004;
 scene.add(sun);
-
+applyDaylight();
 // ---------------- ground: wet asphalt ----------------
 function asphaltTextures(){
   const c = document.createElement('canvas'); c.width=c.height=1024;
@@ -520,6 +567,9 @@ scene.add(guard);
 
 // ---------------- assets: chargers & cars ----------------
 const loader = new GLTFLoader();
+const draco = new DRACOLoader();
+draco.setDecoderPath('vendor/libs/draco/gltf/');
+loader.setDRACOLoader(draco);
 function loadGLB(path){ return new Promise((res,rej)=>{ const to=setTimeout(()=>rej(new Error('timeout '+path)), 120000); loader.load(path,(g)=>{clearTimeout(to);res(g);},(e)=>{},(e)=>{clearTimeout(to);rej(new Error('loadfail '+path+' '+(e&&(e.message||e.type||''))));}); }); }
 
 let chargerProto=null, carProtos=[];
@@ -621,6 +671,20 @@ async function loadAssets(){
   console.log('STAGE props');
   await loadProps();
   console.log('STAGE propsdone');
+  // Ferrari hero (Draco) — interior, calipers, carbon
+  try{
+    const fer = await loadGLB('assets/ferrari.glb');
+    const f = orientCar(fer.scene); boostEnv(f, 3.4);
+    f.traverse(o=>{ if(o.isMesh&&o.material){ const ms=Array.isArray(o.material)?o.material:[o.material];
+      for(const m of ms){ const n=(m.name||'').toLowerCase();
+        if(n.includes('glass')||n.includes('projector')){ m.transparent=true; m.opacity=Math.min(m.opacity||1,0.4); m.roughness=0.04; }
+        if(n.includes('taillight')||n.includes('led')||n.includes('turn')){ m.emissive=new THREE.Color(n.includes('turn')?0xff9a20:0xff1a10); m.emissiveIntensity=1.6; }
+        if(n.includes('carbon')){ m.roughness=Math.min(m.roughness,0.35); m.metalness=Math.max(m.metalness,0.4); }
+      } } });
+    carProtos.push(f);
+    console.log('STAGE ferrari ok');
+  }catch(e){ console.warn('ferrari skipped', e && e.message); }
+  collectNightLights();
   if(!loadGame()){ bays[3].locked=true; }
   applyLocked();
   if(bufferOwned) addBuffer();
@@ -687,11 +751,11 @@ function spawnCar(bay, instant=false, vip=false){
   car.rotation.y = Math.PI; // front faces chargers (-Z if model front is +Z we flip after vision check)
   // ground light refs: behind (tail, red) and front (head, warm) — car forward is -Z after rot.y=PI/2
   const cshadow = contactShadow(5.6, 2.8, 0, 0, 0.9); cshadow.position.set(car.position.x, 0.018, car.position.z); scene.add(cshadow); bay.cshadow=cshadow;
-  const tail=new THREE.Mesh(new THREE.PlaneGeometry(1.7,2.6), new THREE.MeshBasicMaterial({map:carReflTexRed,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.18}));
+  const tail=new THREE.Mesh(new THREE.PlaneGeometry(1.7,2.6), new THREE.MeshBasicMaterial({map:carReflTexRed,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.32}));
   tail.rotation.x=-Math.PI/2; tail.position.set(car.position.x, 0.016, car.position.z+1.4); tail.rotation.z=Math.PI; tail.renderOrder=5; scene.add(tail); bay.tailRefl=tail;
-  const head=new THREE.Mesh(new THREE.PlaneGeometry(1.5,2.2), new THREE.MeshBasicMaterial({map:carReflTexWarm,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.15}));
+  const head=new THREE.Mesh(new THREE.PlaneGeometry(1.5,2.2), new THREE.MeshBasicMaterial({map:carReflTexWarm,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.28}));
   head.rotation.x=-Math.PI/2; head.position.set(car.position.x, 0.016, car.position.z-1.2); head.renderOrder=5; scene.add(head); bay.headRefl=head;
-  if(vip){ car.traverse(o=>{ if(o.isMesh&&o.material&&o.material.name&&o.material.name.toLowerCase().includes('paint')){ o.material=o.material.clone(); o.material.color.setHex(0xd9a520); o.material.metalness=0.95; o.material.roughness=0.15; } }); }
+  if(vip){ car.traverse(o=>{ if(o.isMesh&&o.material&&o.material.name&&(o.material.name.toLowerCase().includes('paint')||o.material.name.toLowerCase().includes('body_color'))){ o.material=o.material.clone(); o.material.color.setHex(0xd9a520); o.material.metalness=0.95; o.material.roughness=0.15; } }); }
   scene.add(car); bay.car=car; bay.state='arriving';
   // world-space charge progress bar floating above the car
   const barG=new THREE.Group();
@@ -1093,6 +1157,8 @@ function animate(){
 
   // clock + price drift
   gameClock += dt*1.4; // game time accelerated
+  applyDaylight(gameClock);
+  fog.density = THREE.MathUtils.lerp(0.010, 0.0055, THREE.MathUtils.smoothstep(Math.sin(((gameClock/1440)*Math.PI*2)-Math.PI/2)*0.62, 0.04, 0.45)) + raining*0.0012;
   const hh=Math.floor(gameClock/60)%24, mm=Math.floor(gameClock%60);
   clockEl.textContent = String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
   spotPrice = 0.10+0.06*Math.sin(gameClock/47)+0.02*Math.sin(gameClock/7.3);
@@ -1140,7 +1206,7 @@ function animate(){
   if(gameClock>=24*60){ gameClock-=24*60; endDay(); }
   priceEl.textContent = (spotPrice*100).toFixed(1)+'¢/kWh';
   sign.drawSign(spotPrice*100);
-  fog.density = 0.007 + raining*0.0015;
+  // (fog density driven by day/night line above)
 
   // wet shimmer: drift asphalt normal UVs while raining
   if(raining>0.05 && asphalt.material.normalMap){ asphalt.material.normalMap.offset.x=(asphalt.material.normalMap.offset.x+dt*0.004)%1; asphalt.material.normalMap.offset.y=(asphalt.material.normalMap.offset.y+dt*0.006)%1; }
@@ -1160,10 +1226,10 @@ function animate(){
   rainMat.opacity = 0.28+raining*0.30;
   // camera lens droplets overlay
   if(lensFx){ lensFx.style.opacity = Math.min(1, raining*1.15); raining>0.05 && lensDrip(dt); }
-  let wx='Clear dusk';
-  if(raining>0.4) wx='Light rain';
+  let wx = nightK>0.82? 'Clear night' : (nightK>0.25? 'Dusk' : 'Clear');
+  if(raining>0.4) wx = (nightK>0.82? 'Rainy night' : nightK>0.25? 'Rainy dusk' : 'Light rain');
   if(now<coldUntil) wx = (raining>0.4?'Freezing rain':'Cold snap');
-  if(now<brownUntil) wx += wx==='Clear dusk'? ' · Brownout' : ' + Brownout';
+  if(now<brownUntil) wx += ' + Brownout';
   wxEl.textContent = wx;
   SFX.setRain(raining);
 
@@ -1269,6 +1335,7 @@ try{
   composer.addPass(ssao);
 }catch(e){ console.warn('ssao unavailable', e); }
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 0.12, 0.45, 0.95);
+bloomPass = bloom;
 composer.addPass(bloom);
 const FinalFX = {
   uniforms:{ tDiffuse:{value:null}, time:{value:0}, aberr:{value:0.0006}, grain:{value:0.006}, vign:{value:0.24} },
@@ -1324,6 +1391,7 @@ window.__GAME = {
     if(name==='vip'){ vipPending=true; vipSpawned=false; return 'vip'; }
     if(name==='rain'){ raining=0.8; return 'rain'; } return 'none'; },
   forceArr(i,vip){ const b=bays[i]; if(b.state!=='empty') return 'busy'; spawnCar(b,false,!!vip); return 'ok'; },
+  info(){ return {nightK:+nightK.toFixed(3), clock:Math.floor(gameClock), protos:carProtos.length, fixtures:nightFixtures.length}; },
   // ---- soak-test hooks: drive the REAL interaction path ----
   bayState(i){ const b=bays[i]; return {state:b.state, batt:b.car?+b.car.userData.battery.toFixed(3):null, kwh:+(b.chargeKwh||0).toFixed(3), pat:b.car?+((performance.now()-b.car.userData.arrived)/1000).toFixed(1):null}; },
   grab(i){ if(bays[i].plugged) return 'plugged'; if(grabbedBay&&grabbedBay!==bays[i]) return 'busy'; grabbedBay=bays[i]; docked=false; return 'grabbed'; },
