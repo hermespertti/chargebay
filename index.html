@@ -42,7 +42,7 @@
   #joy{position:absolute;left:26px;bottom:26px;width:120px;height:120px;border-radius:50%;background:rgba(20,40,60,.35);border:1px solid rgba(140,220,255,.35);pointer-events:auto;}
   #knob{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;background:rgba(140,220,255,.45);border:1px solid rgba(200,240,255,.6);}
   .tbtn{position:absolute;right:22px;width:74px;height:74px;border-radius:50%;background:rgba(13,34,51,.6);border:1px solid #8fe3ff66;color:#dff4ff;font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;-webkit-user-select:none;}
-  #tE{bottom:110px;} #tR{bottom:24px; right:110px;}
+  #tE{bottom:110px;} #tR{bottom:24px; right:110px;} #tM{bottom:110px; right:110px; width:48px; height:48px; font-size:16px; opacity:.85;}
   @media (pointer:coarse){ #crosshair{opacity:.5;} }
 </style>
 </head>
@@ -65,11 +65,12 @@
     <div id="joy"><div id="knob"></div></div>
     <div class="tbtn" id="tE">E</div>
     <div class="tbtn" id="tR">⚡</div>
+    <div class="tbtn" id="tM">🔊</div>
   </div>
   <div id="start">
     <h1>⚡ CHARGEBAY</h1>
     <p>Dusk. Rain's coming. Pull up, grab the connector, and get these cars charged.</p>
-    <p style="font-size:13px;opacity:.8">WASD move · Mouse look · <b>E</b> interact · <b>R</b> start/stop charging · <b>Esc</b> release mouse</p>
+    <p style="font-size:13px;opacity:.8">WASD move · Mouse look · <b>E</b> interact · <b>R</b> start/stop charging · <b>M</b> mute · <b>Esc</b> release mouse</p>
     <button id="playbtn">ENTER THE BAY</button>
   </div>
 </div>

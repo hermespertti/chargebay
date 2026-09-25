@@ -660,7 +660,7 @@ function spawnCar(bay, instant=false){
 
 // ---------------- interaction state ----------------
 const keys={};
-addEventListener('keydown',e=>{ keys[e.code]=true; onKey(e); });
+addEventListener('keydown',e=>{ SFX.resume(); keys[e.code]=true; onKey(e); });
 addEventListener('keyup',e=>keys[e.code]=false);
 
 let ready=false;
@@ -674,6 +674,51 @@ const clockEl=document.getElementById('clock'), priceEl=document.getElementById(
 
 function toast(msg){ toastEl.innerHTML=msg; toastEl.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>toastEl.classList.remove('show'),2200); }
 
+// ---------------- AUDIO: procedural Web Audio (no assets) ----------------
+const SFX = (function(){
+  let ctx=null, master=null, rainGain=null, rainSrc=null, humGain=null, humOsc=[], humFilter=null, muted=false;
+  function ensure(){
+    if(ctx) return ctx;
+    ctx = new (window.AudioContext||window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value = muted?0:0.9; master.connect(ctx.destination);
+    // ---- rain bed: looping filtered white noise ----
+    const len = ctx.sampleRate*2, buf = ctx.createBuffer(1,len,ctx.sampleRate), d=buf.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+    rainSrc = ctx.createBufferSource(); rainSrc.buffer=buf; rainSrc.loop=true;
+    const hp=ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=900;
+    const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=6500;
+    rainGain = ctx.createGain(); rainGain.gain.value=0;
+    rainSrc.connect(hp); hp.connect(lp); lp.connect(rainGain); rainGain.connect(master);
+    rainSrc.start();
+    // ---- charge hum: two detuned low oscillators through lowpass ----
+    humFilter = ctx.createBiquadFilter(); humFilter.type='lowpass'; humFilter.frequency.value=160;
+    humGain = ctx.createGain(); humGain.gain.value=0;
+    humFilter.connect(humGain); humGain.connect(master);
+    [56,70].forEach(f=>{ const o=ctx.createOscillator(); o.type='sawtooth'; o.frequency.value=f; o.connect(humFilter); o.start(); humOsc.push(o); });
+    return ctx;
+  }
+  function resume(){ const c=ensure(); if(c.state==='suspended') c.resume(); api.ctx=c; }
+  function setRain(v){ if(!ctx) return; rainGain.gain.setTargetAtTime(v*0.16, ctx.currentTime, 0.6); }
+  function setCharge(active, n){ if(!ctx) return; const g=active? Math.min(0.10, 0.04*n):0; humGain.gain.setTargetAtTime(g, ctx.currentTime, 0.4); humFilter.frequency.setTargetAtTime(active?220:120, ctx.currentTime, 0.5); }
+  function click(freq){ if(!ctx||muted) return; const t=ctx.currentTime;
+    const o=ctx.createOscillator(); o.type='square'; o.frequency.setValueAtTime(freq||240,t); o.frequency.exponentialRampToValueAtTime((freq||240)*0.4, t+0.05);
+    const g=ctx.createGain(); g.gain.setValueAtTime(0.22,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.07);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t+0.08); }
+  function latch(){ if(!ctx||muted) return; click(320); setTimeout(()=>click(520),45); }
+  function chime(a,b){ if(!ctx||muted) return; const t=ctx.currentTime;
+    [a,b].forEach((f,i)=>{ const o=ctx.createOscillator(); o.type='sine'; o.frequency.value=f;
+      const g=ctx.createGain(); g.gain.setValueAtTime(0,t+i*0.09); g.gain.linearRampToValueAtTime(0.18,t+i*0.09+0.02); g.gain.exponentialRampToValueAtTime(0.001,t+i*0.09+0.5);
+      o.connect(g); g.connect(master); o.start(t+i*0.09); o.stop(t+i*0.09+0.55); }); }
+  function cash(){ if(!ctx||muted) return; const t=ctx.currentTime;
+    [1046,1318,1568].forEach((f,i)=>{ const o=ctx.createOscillator(); o.type='triangle'; o.frequency.value=f;
+      const g=ctx.createGain(); g.gain.setValueAtTime(0,t+i*0.07); g.gain.linearRampToValueAtTime(0.16,t+i*0.07+0.015); g.gain.exponentialRampToValueAtTime(0.001,t+i*0.07+0.42);
+      o.connect(g); g.connect(master); o.start(t+i*0.07); o.stop(t+i*0.07+0.5); }); }
+  function toggleMute(){ muted=!muted; if(master) master.gain.setTargetAtTime(muted?0:0.9, ctx.currentTime, 0.05); return muted; }
+  const api={ resume, setRain, setCharge, click, latch, chime, cash, toggleMute, get muted(){return muted;} };
+  window.__SFXREF = api;
+  return api;
+})();
+
 let gameClock = 18*60+42; // minutes, dusk
 let spotPrice = 0.124;
 
@@ -681,6 +726,7 @@ function onKey(e){
   if(!ready) return;
   if(e.code==='KeyE') tryInteract();
   if(e.code==='KeyR') toggleCharge();
+  if(e.code==='KeyM'){ const m=SFX.toggleMute(); toast(m?'🔇 Muted':'🔊 Sound on'); }
 }
 
 // controller
@@ -695,12 +741,12 @@ function enterTouch(){
   startEl.style.display='none';
   touchEl.style.display='block';
 }
-document.getElementById('playbtn').addEventListener('click',()=>{ if(isTouch) enterTouch(); else controls.lock(); });
+document.getElementById('playbtn').addEventListener('click',()=>{ SFX.resume(); if(isTouch) enterTouch(); else controls.lock(); });
 startEl.addEventListener('click',(e)=>{ if(!isTouch && e.target.id!=='playbtn') controls.lock(); });
 controls.addEventListener('lock', ()=>{ startEl.style.display='none'; });
 controls.addEventListener('unlock', ()=>{ if(ready && !isTouch && !touchMode) startEl.style.display='flex'; });
 // desktop: clicking the game view re-locks the mouse (fixes "mouse never locked")
-renderer.domElement.addEventListener('click',()=>{ if(ready && !isTouch && controls.isLocked===false) controls.lock(); });
+renderer.domElement.addEventListener('click',()=>{ SFX.resume(); if(ready && !isTouch && controls.isLocked===false) controls.lock(); });
 
 // ---- touch controls: left stick = move, right-drag = look, buttons = E / ⚡ ----
 let tF=0, tS=0, stickId=null, lookId=null, lastLX=0, lastLY=0;
@@ -758,8 +804,10 @@ if(isTouch){
       lastLX=t.clientX; lastLY=t.clientY;
     }
   });
-  document.getElementById('tE').addEventListener(startEvt==='pointerdown'?'pointerdown':'touchstart',(ev)=>{ ev.preventDefault(); if(ready) tryInteract(); });
-  document.getElementById('tR').addEventListener(startEvt==='pointerdown'?'pointerdown':'touchstart',(ev)=>{ ev.preventDefault(); if(ready) toggleCharge(); });
+  document.getElementById('tE').addEventListener(startEvt==='pointerdown'?'pointerdown':'touchstart',(ev)=>{ ev.preventDefault(); SFX.resume(); if(ready) tryInteract(); });
+  document.getElementById('tR').addEventListener(startEvt==='pointerdown'?'pointerdown':'touchstart',(ev)=>{ ev.preventDefault(); SFX.resume(); if(ready) toggleCharge(); });
+  const tmBtn=document.getElementById('tM');
+  tmBtn.addEventListener(startEvt==='pointerdown'?'pointerdown':'touchstart',(ev)=>{ ev.preventDefault(); SFX.resume(); const m=SFX.toggleMute(); tmBtn.textContent=m?'🔇':'🔊'; });
 }
 
 let vy=0, bob=0;
@@ -805,7 +853,7 @@ function tryInteract(){
   if(grabbedBay===b && docked){ // unplug
     docked=false; b.state='parked';
     b.car.userData.arrived=performance.now(); // fresh patience so they can re-plug
-    b.car.userData.docked=false; toast('🔌 Connector unplugged');
+    b.car.userData.docked=false; SFX.click(200); toast('🔌 Connector unplugged');
     grabbedBay.plug.position.copy(grabbedBay.plugHome.pos);
     grabbedBay.plug.rotation.copy(grabbedBay.plugHome.rot);
     grabbedBay=null; return;
@@ -817,13 +865,13 @@ function tryInteract(){
       port.applyQuaternion(b.car.quaternion); port.add(b.car.position);
       if(port.distanceTo(camera.position)<2.2){
         docked=true; b.car.userData.docked=true; b.state='ready';
-        toast('✅ Locked — press R to energize'); return;
+        SFX.latch(); toast('✅ Locked — press R to energize'); return;
       } else { toast('❌ Move closer to the port'); return; }
     }
   }
   if(t.type==='charger' && !grabbedBay){
     // if bay car present and port side reachable, grabbing plug allowed
-    grabbedBay=b; docked=false; toast('🔌 Grabbed connector — aim at car port, press E');
+    grabbedBay=b; docked=false; SFX.click(260); toast('🔌 Grabbed connector — aim at car port, press E');
     return;
   }
 }
@@ -831,9 +879,9 @@ function tryInteract(){
 function toggleCharge(){
   if(!grabbedBay || !docked) { toast('Dock the connector first (E)'); return; }
   const b=grabbedBay;
-  if(b.state==='charging'){ b.state='ready'; toast('⏸ Charging paused'); return; }
-  b.state='charging'; b.price=spotPrice; b.kwhStart=0;
-  toast('⚡ Charging at 350 kW');
+  if(b.state==='charging'){ b.state='ready'; SFX.click(180); toast('⏸ Charging paused'); return; }
+  b.state='charging'; b.price=spotPrice; b.kwhStart=0; b.chargeKwh=0;
+  SFX.click(420); toast('⚡ Charging at 350 kW');
 }
 
 // ---------------- contact shadows ----------------
@@ -924,6 +972,7 @@ function animate(){
   rain.instanceMatrix.needsUpdate=true;
   rainMat.opacity = 0.28+raining*0.30;
   wxEl.textContent = raining>0.4?'Light rain':'Clear dusk';
+  SFX.setRain(raining);
 
   // bay logic
   let totalKw=0;
@@ -933,7 +982,7 @@ function animate(){
       if(b.tailRefl) b.tailRefl.position.z = b.car.position.z+1.4;
       if(b.headRefl) b.headRefl.position.z = b.car.position.z-1.2;
       if(b.cshadow) b.cshadow.position.z = b.car.position.z;
-      if(Math.abs(b.car.position.z-b.driveTo)<0.05){ b.state='parked'; toast('🚗 New arrival — bay '+(BAYS.indexOf(b.x)+1)); }
+      if(Math.abs(b.car.position.z-b.driveTo)<0.05){ b.state='parked'; SFX.chime(660,880); toast('🚗 New arrival — bay '+(BAYS.indexOf(b.x)+1)); }
     }
     if(b.state==='charging' && b.car){
       const add = dt*0.02; // fraction of pack per real second (~45 s full charge, game-time compressed)
@@ -942,7 +991,7 @@ function animate(){
       b.chargeKwh=(b.chargeKwh||0)+kwh;
       totalKw+=350;
       const rev = kwh*b.price; revenue+=rev; b.sessionRev+=rev;
-      if(b.car.userData.battery>=1){ b.state='departing'; revenue+=0; toast('🎉 Charge complete +$'+b.sessionRev.toFixed(2)); served++; b.sessionRev=0; }
+      if(b.car.userData.battery>=1){ b.state='departing'; toast('🎉 Charge complete +$'+b.sessionRev.toFixed(2)); SFX.cash(); served++; b.sessionRev=0; }
       // plug LED: pulse ring — scale plug emissive via material hack
       if(b.plug){ b.plug.traverse(o=>{ if(o.isMesh&&o.material&&o.material.emissive) o.material.emissiveIntensity = 6+Math.sin(now/120)*4; }); }
     }
@@ -961,9 +1010,10 @@ function animate(){
     // patience: idle parked/held car leaves
     if((b.state==='parked'||b.state==='ready') && b.car && !b.car.userData.docked){
       const waited=(now-b.car.userData.arrived)/1000;
-      if(waited>b.car.userData.patience){ b.state='departing'; toast('😠 Left without charging'); }
+      if(waited>b.car.userData.patience){ b.state='departing'; SFX.chime(300,220); toast('😠 Left without charging'); }
     }
   }
+  if(totalKw>0) SFX.setCharge(true, totalKw/350); else SFX.setCharge(false);
   loadEl.textContent = totalKw+' kW';
   revEl.textContent = '$'+revenue.toFixed(2);
   servedEl.textContent = served;
@@ -1055,6 +1105,7 @@ window.__GAME = {
   dock(i){ if(grabbedBay!==bays[i]) return 'notgrabbed'; if(!bays[i].car) return 'nocar'; docked=true; bays[i].car.userData.docked=true; bays[i].state='ready'; return 'docked'; },
   energize(){ toggleCharge(); return grabbedBay? grabbedBay.state : 'none'; },
   econ(){ return {revenue:+revenue.toFixed(2), served, price:+spotPrice.toFixed(4)}; },
+  audio(){ return { active: !!(window.__SFXREF && window.__SFXREF.ctx), muted: SFX.muted }; },
 };
 
 loadAssets().catch(e=>{ console.error('asset load failed', e && e.type, e && e.message); ready=true; if(!envReady) envReady=true; });
