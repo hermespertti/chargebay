@@ -189,7 +189,13 @@ const asphalt = new THREE.Mesh(
   const amap=tl.load('assets/ground/col.jpg'); amap.colorSpace=THREE.SRGBColorSpace; amap.wrapS=amap.wrapT=THREE.RepeatWrapping; amap.repeat.set(22,22); amap.anisotropy=Math.max(8,MAXA);
   const rmap=tl.load('assets/ground/rgh.jpg'); rmap.wrapS=rmap.wrapT=THREE.RepeatWrapping; rmap.repeat.set(22,22); rmap.anisotropy=Math.max(8,MAXA);
   const nmap=tl.load('assets/ground/nrm.jpg'); nmap.wrapS=nmap.wrapT=THREE.RepeatWrapping; nmap.repeat.set(22,22); nmap.anisotropy=Math.max(8,MAXA);
-  return new THREE.MeshStandardMaterial({ map:amap, roughnessMap:rmap, roughness:0.38, normalMap:nmap, normalScale:new THREE.Vector2(0.8,-0.8), metalness:0.2, color:0x6b727c, envMapIntensity:2.2 });
+  const wm=(()=>{ const c=document.createElement('canvas'); c.width=c.height=1024; const g=c.getContext('2d');
+    g.fillStyle='#ffffff'; g.fillRect(0,0,1024,1024); g.filter='blur(26px)';
+    g.save(); g.translate(512,512); g.scale(1.35,1.0);
+    const rg=g.createRadialGradient(0,0,0,0,0,95); rg.addColorStop(0,'rgba(0,0,0,0.92)'); rg.addColorStop(0.6,'rgba(0,0,0,0.7)'); rg.addColorStop(1,'rgba(0,0,0,0)');
+    g.fillStyle=rg; g.beginPath(); g.arc(0,0,95,0,Math.PI*2); g.fill(); g.restore();
+    const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.ClampToEdgeWrapping; return t; })();
+  return new THREE.MeshStandardMaterial({ map:amap, roughnessMap:rmap, roughness:0.38, normalMap:nmap, normalScale:new THREE.Vector2(0.8,-0.8), metalness:0.2, color:0x6b727c, envMapIntensity:2.2, alphaMap:wm, transparent:true });
 })()
 );
 asphalt.rotation.x = -Math.PI/2; asphalt.receiveShadow = true; asphalt.renderOrder=1; scene.add(asphalt);
@@ -268,11 +274,11 @@ const streaks = new THREE.Group();
 }
 scene.add(streaks);
 
-const mirror = new Reflector(new THREE.PlaneGeometry(160,160), {
-  clipBias: 0.004, textureWidth: 2048, textureHeight: 2048, color: 0x232830
+const mirror = new Reflector(new THREE.PlaneGeometry(46,34), {
+  clipBias: 0.004, textureWidth: 1024, textureHeight: 1024, color: 0x2a2f38
 });
-mirror.rotation.x=-Math.PI/2; mirror.position.y=0.004; mirror.renderOrder=0;
-mirror.visible=false; scene.add(mirror);
+mirror.rotation.x=-Math.PI/2; mirror.position.set(0,-0.002,1.5); mirror.renderOrder=0;
+mirror.visible=true; scene.add(mirror);
 // mask so reflector only shows through puddles: puddle-alpha canvas plane above
 function puddleMask(){
   const c=document.createElement('canvas'); c.width=c.height=512;
@@ -327,7 +333,8 @@ function buildCanopy(){
   const dark  = new THREE.MeshStandardMaterial({color:0x22262e, metalness:0.55, roughness:0.45, envMapIntensity:1.8});
   const solar = new THREE.MeshStandardMaterial({color:0x0a1226, metalness:0.85, roughness:0.15, envMapIntensity:2.2});
   const led = new THREE.MeshStandardMaterial({color:0x0a141c, emissive:0x86b8d8, emissiveIntensity:0.65});
-  const fill = new THREE.PointLight(0xffdcb0, 12, 22, 1.8); fill.position.set(0,3.9,-3.0); g.add(fill);
+  const fill = new THREE.PointLight(0xffd2a8, 26, 26, 1.6); fill.position.set(0,3.8,-3.0); g.add(fill);
+  const fill2 = new THREE.PointLight(0x9ab8d8, 10, 20, 1.8); fill2.position.set(0,2.2,4.5); g.add(fill2);
   const ledW = new THREE.MeshStandardMaterial({color:0x0c1410, emissive:0x9fc8b4, emissiveIntensity:0.7});
   // roof slab
   const roof = new THREE.Mesh(new THREE.BoxGeometry(20.4,0.28,9.2), dark);
@@ -360,6 +367,7 @@ function buildCanopy(){
   for(let i=0;i<4;i++){
     const x=-6.6+i*4.4;
     const hous = new THREE.Mesh(new THREE.BoxGeometry(1.6,0.07,0.3), dark); hous.position.set(x,4.44,-3.0); g.add(hous);
+    const lens = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.22), new THREE.MeshStandardMaterial({color:0x101418, emissive:0xffecd0, emissiveIntensity:6.0})); lens.rotation.x=Math.PI/2; lens.position.set(x,4.4,-3.0); g.add(lens);
     const emit = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.22), new THREE.MeshBasicMaterial({color:0xc9b69c}));
     emit.rotation.x=Math.PI/2; emit.position.set(x,4.40,-3.0); g.add(emit);
     const sp = new THREE.SpotLight(0xffe3bd, 45, 12, Math.PI/3.4, 0.7, 1.6);
@@ -781,7 +789,7 @@ function animate(){
   spotPrice = 0.10+0.06*Math.sin(gameClock/47)+0.02*Math.sin(gameClock/7.3);
   priceEl.textContent = (spotPrice*100).toFixed(1)+'¢/kWh';
   sign.drawSign(spotPrice*100);
-  fog.density = 0.009 + raining*0.002;
+  fog.density = 0.007 + raining*0.0015;
 
   // rain update — streak drop + reinstance
   const fall=(9+raining*11)*dt, wind=raining*2.2*dt;
