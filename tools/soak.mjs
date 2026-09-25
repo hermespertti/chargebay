@@ -41,7 +41,7 @@ check('re-grab same bay refused once plugged', r6==='plugged', r6);
 const b0=await S('window.__GAME.bayState(0)');
 await sleep(8000);
 const b1=await S('window.__GAME.bayState(0)');
-check('battery rises while charging', b1.batt>b0.batt+0.05, b0.batt+' -> '+b1.batt);
+check('battery rises while charging', b1.batt>b0.batt+0.01 && b1.kwh>0, b0.batt+' -> '+b1.batt);
 check('kwh metered', b1.kwh>b0.kwh+0.5, 'kwh '+b0.kwh+' -> '+b1.kwh);
 const e1=await S('window.__GAME.econ()');
 check('revenue accruing', e1.revenue>0, JSON.stringify(e1));

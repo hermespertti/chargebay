@@ -590,7 +590,7 @@ draco.setDecoderPath('vendor/libs/draco/gltf/');
 loader.setDRACOLoader(draco);
 function loadGLB(path){ return new Promise((res,rej)=>{ const to=setTimeout(()=>rej(new Error('timeout '+path)), 120000); loader.load(path,(g)=>{clearTimeout(to);res(g);},(e)=>{},(e)=>{clearTimeout(to);rej(new Error('loadfail '+path+' '+(e&&(e.message||e.type||''))));}); }); }
 
-let chargerProto=null, carProtos=[];
+let chargerProto=null, carProtos=[], origProtos=[];
 const bays = BAYS.map(x=>({ x, charger:null, car:null, state:'empty', plug:null, plugHome:null, chargeKwh:0, sessionRev:0, sessionCost:0, price:0.124, tier:0, kw:150, sell:0.25 }));
 
 const PAINTS = [0x0a2e6b, 0xe8dcc8, 0x8f0f14, 0x1c2026, 0x0f4d3a, 0x6b6e73];
@@ -692,6 +692,28 @@ async function loadAssets(){
     v.traverse(o=>{ if(o.isMesh&&o.material&&o.material.name&&o.material.name.startsWith('Paint')){ o.material=o.material.clone(); o.material.color.setHex(col); } });
     carProtos.push(v);
   }
+  // ORIGINAL car (authored in Blender by this project): car_ev1 + paint variants
+  try{
+    const og = await loadGLB('assets/car_ev1.glb');
+    const o1 = orientCar(og.scene); boostEnv(o1, 3.0);
+    o1.traverse(o=>{ if(o.isMesh&&o.material){ const ms=Array.isArray(o.material)?o.material:[o.material];
+      for(const m of ms){ const n=(m.name||'').toLowerCase();
+        if(n.includes('glass')){ m.transparent=true; m.opacity=0.5; m.roughness=0.05; m.metalness=0.9; m.envMapIntensity=4.0; m.side=THREE.FrontSide; }
+        if(n.includes('headlight')){ m.emissive=new THREE.Color(0xfff0cc); m.emissiveIntensity=2.2; }
+        if(n.includes('taillight')){ m.emissive=new THREE.Color(0xff1508); m.emissiveIntensity=2.0; }
+        if(n.includes('rim')){ m.envMapIntensity=1.4; }
+        if(n.includes('caliper')){ m.emissive=new THREE.Color(0xff3300); m.emissiveIntensity=0.35; }
+        if(n.includes('tire')||n.includes('brakedisc')){ m.envMapIntensity=0.6; }
+      } } });
+    origProtos.push(o1);
+    for(const col of [PAINTS[2], PAINTS[0], 0x11131a, 0xe8dcc8]){
+      const v = o1.clone(true);
+      v.traverse(o=>{ if(o.isMesh&&o.material&&o.material.name&&o.material.name.toLowerCase().includes('paint')){ o.material=o.material.clone(); o.material.color.setHex(col); } });
+      origProtos.push(v);
+    }
+    origProtos.forEach(p=>carProtos.push(p));
+    console.log('STAGE orig car ok', origProtos.length);
+  }catch(e){ console.warn('orig car skipped', e&&e.message); }
   // place chargers
   bays.forEach((b,i)=>{
     const ch = chargerProto.clone(true);
@@ -788,7 +810,8 @@ async function loadPlugs(){
   });
 }
 function bayPort(b){
-  const port=new THREE.Vector3(-1.5*(b.car.scale.x),0.62,-0.95);
+  const pl = (b.car.userData && b.car.userData.portLocal) || new THREE.Vector3(-1.5,0.62,-0.95);
+  const port=new THREE.Vector3(pl.x*b.car.scale.x, pl.y*b.car.scale.y, pl.z*b.car.scale.z);
   port.applyQuaternion(b.car.quaternion); port.add(b.car.position);
   return port;
 }
@@ -1646,6 +1669,7 @@ window.__GAME = {
   ready:()=>ready, envReady:()=>envReady,
   carBoxes(){ const out=[]; for(const b of bays){ if(b.car){ const bb=new THREE.Box3().setFromObject(b.car); out.push({bay:b.x, state:b.state, min:bb.min.toArray().map(v=>+v.toFixed(2)), max:bb.max.toArray().map(v=>+v.toFixed(2))}); } } return out; },
   pose(x,y,z,ry,rx){ camera.position.set(x,y,z); camera.rotation.set(rx||0,ry,0); },
+  lookAt(x,y,z,dist,up){ const c=camera.position; const d=new THREE.Vector3(x-c.x,y-c.y,z-c.z); d.normalize(); const p=c.clone().addScaledVector(d,-(dist||6)); camera.position.copy(p); const yaw=Math.atan2(-(x-p.x),-(z-p.z)); camera.rotation.set(0,yaw,0); },
   groundInfo(){ const mats=[]; scene.traverse(o=>{ if(o.isMesh && o.geometry && o.geometry.type==='PlaneGeometry' && o.geometry.parameters && o.geometry.parameters.width===220){ const m=o.material; mats.push({name:m.name||'std', hasMap:!!m.map, mapSrc:m.image?m.image.src||m.image.currentSrc||('w'+m.image.width):null, repeat:m.map?[m.map.repeat.x,m.map.repeat.y]:null, rough:m.roughness, metal:m.metalness, vis:o.visible}); } }); return mats; },
   serve(){ served+=1; },
   setClock(h){ gameClock=h*60; },
@@ -1667,6 +1691,15 @@ window.__GAME = {
   techmenu(force){ toggleTechMenu(force); return techOpen; },
   aimPort(i){ const b=bays[i]; if(!b.car) return 'nocar'; const p=bayPort(b); camera.position.set(p.x+1.35, p.y+0.15, p.z+0.45); camera.lookAt(p); return 'ok'; },
   portPos(i){ const b=bays[i]; if(!b.car) return null; const p=bayPort(b); return {x:+p.x.toFixed(2),y:+p.y.toFixed(2),z:+p.z.toFixed(2)}; },
+  forceOrig(i,ci){ scene.traverse(o=>{ if(o.type==='Group'&&o!==bays[i]?.car&&o.userData&&o.userData.fleet) o.visible=false; });
+    bays.forEach((bb,j)=>{ if(j!==i&&bb.car){ bb.car.visible=false; } if(bb.cshadow&&j!==i) bb.cshadow.visible=false; });
+    const b=bays[i]; if(b.car){ scene.remove(b.car); b.car=null; }
+    const proto=origProtos.length? origProtos[(ci||0)%origProtos.length] : null; if(!proto) return 'noproto';
+    const car=proto.clone(true); car.traverse(o=>{ if(o.isMesh){o.castShadow=true;o.receiveShadow=true;} });
+    car.userData={ battery:0.18, need:0.9, patience:9999, arrived:performance.now(), vip:false, seg:SEGMENTS[0], packKwh:75, portLocal:new THREE.Vector3(-0.60,0.62,-0.88) };
+    car.position.set(b.x,0,-3.1); car.rotation.y=Math.PI; scene.add(car); b.car=car; b.state='parked'; b.plugged=false;
+    if(b.cshadow){ b.cshadow.position.set(b.x, 0.018, -3.1); b.cshadow.visible=true; } else { b.cshadow=contactShadow(5.6,2.8,b.x,-3.1,0.9); }
+    return 'ok'; },
   carPos(i){ const b=bays[i]; if(!b.car) return null; return {x:+b.car.position.x.toFixed(2),y:+b.car.position.y.toFixed(2),z:+b.car.position.z.toFixed(2),yaw:+b.car.rotation.y.toFixed(2)}; },
   plugBox(i){ const b=bays[i]; if(!b.plug) return null; const bb=new THREE.Box3().setFromObject(b.plug); return {min:[+bb.min.x.toFixed(2),+bb.min.y.toFixed(2),+bb.min.z.toFixed(2)],max:[+bb.max.x.toFixed(2),+bb.max.y.toFixed(2),+bb.max.z.toFixed(2)]}; },
   plugRot(i,z,x){ const b=bays[i]; if(!b.plug) return 'noplug'; if(z!==undefined) b.plug.quaternion.setFromEuler(new THREE.Euler(x||0, 0, z, 'ZXY')); else b.plug.quaternion.set(0,0,0,1); b.plug.position.copy(bayPort(b)); return 'ok'; },
