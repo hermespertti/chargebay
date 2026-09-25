@@ -676,6 +676,7 @@ async function loadProps(){
 async function loadAssets(){
   console.log('STAGE chargers');
   const c = await loadGLB('assets/charger.glb'); chargerProto=c.scene; boostEnv(c.scene, 1.8);
+  c.scene.traverse(o=>{ if(o.isMesh&&o.material){ const ms=Array.isArray(o.material)?o.material:[o.material]; for(const m of ms){ if(m.name==='ChargerScreen'){ m.emissive.setRGB(0.03,0.30,0.85); m.emissiveIntensity=3.0; } if(m.name==='ChargerLED'){ m.emissiveIntensity=1.8; } } } });
   // hero cars: Khronos CarConcept + three.js Ferrari
   console.log('STAGE hero');
   const hero1 = await loadGLB('assets/car_concept.glb');
@@ -694,7 +695,7 @@ async function loadAssets(){
   // place chargers
   bays.forEach((b,i)=>{
     const ch = chargerProto.clone(true);
-    ch.position.set(b.x, 0, -6.0); ch.rotation.y = 0; ch.scale.setScalar(1.25);
+    ch.position.set(b.x, 0, -6.0); ch.rotation.y = 0; ch.scale.setScalar(1.0);
     ch.traverse(o=>{ if(o.isMesh){o.castShadow=true; o.receiveShadow=true;} });
     scene.add(ch); b.charger=ch;
     scene.add(contactShadow(1.4,1.0, b.x, -6.0, 0.9));
@@ -754,6 +755,12 @@ function upgradeBay(b){
   SFX.cash(); toast('🔧 Upgraded to '+nx.kw+' kW');
   if(b.charger) b.charger.traverse(o=>{ if(o.isMesh&&o.material&&o.material.emissive) o.material.emissiveIntensity=2.2; });
 }
+function buyTech(id){
+  const tc=TECH[id]; if(!tc){ toast('Unknown tech'); return false; }
+  if(techOwned[id]){ toast(tc.name+' already installed'); return false; }
+  if(cash<tc.cost){ toast('❌ Need $'+tc.cost); return false; }
+  cash-=tc.cost; dayCost+=tc.cost; techOwned[id]=true; SFX.cash(); toast('🔬 Installed: '+tc.name+' — '+tc.desc); saveGame(); return true;
+}
 function buyBuffer(){
   if(bufferOwned){ toast('Buffer already installed'); return; }
   if(cash<BUFFER_COST){ toast('❌ Need $'+BUFFER_COST); return; }
@@ -770,9 +777,10 @@ async function loadPlugs(){
   const p = await loadGLB('assets/plug.glb'); plugsProto=p.scene;
   bays.forEach(b=>{
     const pl = plugsProto.clone(true);
-    pl.position.set(b.x+0.34, 1.05, -6.0); pl.rotation.set(0,Math.PI,0); pl.scale.setScalar(1.15);
+    pl.position.set(b.x+0.70, 0.95, -6.0); pl.rotation.set(0,0,-Math.PI/2); pl.scale.setScalar(1.15);
     pl.traverse(o=>{ if(o.isMesh){ o.castShadow=true; if(o.material && o.material.name==='CableJacket') o.visible=false; } });
     scene.add(pl); b.plug=pl; b.plugHome={pos:pl.position.clone(), rot:pl.rotation.clone()};
+    b.glandPos=new THREE.Vector3(b.x+0.36, 0.55, -6.0);
     // port target ring: appears at the car port when this bay's connector is in hand
     const ring=new THREE.Mesh(new THREE.RingGeometry(0.14,0.24,28), new THREE.MeshBasicMaterial({color:0x39e6a8,transparent:true,opacity:0,depthWrite:false,depthTest:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide}));
     ring.renderOrder=9; scene.add(ring); b.portRing=ring;
@@ -786,16 +794,25 @@ function bayPort(b){
 }
 
 // spawn a car at a bay with random paint & battery
-function spawnCar(bay, instant=false, vip=false){
+function spawnCar(bay, instant=false, vip=false, seg=null){
+  seg = seg || pickSegment();
   const proto = carProtos[Math.floor(Math.random()*carProtos.length)];
   const car = proto.clone(true);
   car.traverse(o=>{ if(o.isMesh){o.castShadow=true; o.receiveShadow=true;} });
+  const sz = seg.id==='van'? 1.28 : seg.id==='suv'? 1.12 : seg.id==='taxi'? 1.0 : seg.id==='retro'? 0.94 : 1.0;
+  car.scale.multiplyScalar(sz); bay.carScale=sz;
   const roll = vip? 0.03+Math.random()*0.12 : 0.08+Math.random()*0.5;
-  car.userData = { battery: roll, need: vip? 0.95 : 0.72+Math.random()*0.25, patience: vip? 75 : 150+Math.random()*90, arrived: performance.now(), vip };
+  car.userData = { battery: roll, need: vip? 0.95 : 0.72+Math.random()*0.25, patience: vip? 75 : seg.patience[0]+Math.random()*(seg.patience[1]-seg.patience[0]), arrived: performance.now(), vip, seg, packKwh: seg.pack };
+  if(seg.paint){ car.traverse(o=>{ if(o.isMesh&&o.material&&o.material.name&&(o.material.name.toLowerCase().includes('paint')||o.material.name.toLowerCase().includes('body_color'))){ o.material=o.material.clone(); o.material.color.setHex(seg.paint); if(seg.id==='taxi'){ o.material.metalness=0.35; o.material.roughness=0.3; } } }); }
+  if(seg.id==='taxi' && !vip){
+    const sign=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.16,0.24), new THREE.MeshStandardMaterial({color:0xffe14d, emissive:0xcaa100, emissiveIntensity:1.4, roughness:0.4}));
+    sign.position.set(0,1.62,0.1); car.add(sign);
+  }
+  bay.segName = seg.name; bay.segFee = seg.fee;
   car.position.set(bay.x, 0, instant? -3.1 : 16 + Math.random()*6);
   car.rotation.y = Math.PI; // front faces chargers (-Z if model front is +Z we flip after vision check)
   // ground light refs: behind (tail, red) and front (head, warm) — car forward is -Z after rot.y=PI/2
-  const cshadow = contactShadow(5.6, 2.8, 0, 0, 0.9); cshadow.position.set(car.position.x, 0.018, car.position.z); scene.add(cshadow); bay.cshadow=cshadow;
+  const cshadow = contactShadow(5.6*sz, 2.8*sz, 0, 0, 0.9); cshadow.position.set(car.position.x, 0.018, car.position.z); scene.add(cshadow); bay.cshadow=cshadow;
   const tail=new THREE.Mesh(new THREE.PlaneGeometry(1.7,2.6), new THREE.MeshBasicMaterial({map:carReflTexRed,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.32}));
   tail.rotation.x=-Math.PI/2; tail.position.set(car.position.x, 0.016, car.position.z+1.4); tail.rotation.z=Math.PI; tail.renderOrder=5; scene.add(tail); bay.tailRefl=tail;
   const head=new THREE.Mesh(new THREE.PlaneGeometry(1.5,2.2), new THREE.MeshBasicMaterial({map:carReflTexWarm,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.28}));
@@ -810,7 +827,7 @@ function spawnCar(bay, instant=false, vip=false){
   const barTxt=new THREE.Sprite(new THREE.SpriteMaterial({map:barPctTex(''),transparent:true,depthWrite:false}));
   barTxt.scale.set(0.62,0.31,1); barTxt.position.set(0,0.20,0.002);
   barBg.add(barFill); barG.add(barBg); barG.add(barTxt);
-  barG.position.set(car.position.x, 1.86, car.position.z); barG.visible=false; barG.renderOrder=8;
+  bay.barH = 2.05*sz; barG.position.set(car.position.x, 1.86*sz, car.position.z); barG.visible=false; barG.renderOrder=8;
   scene.add(barG); bay.barG=barG; bay.barFill=barFill; bay.barTxt=barTxt; bay.barLast='';
   // drive-in animation target
   bay.driveTo = -3.1;
@@ -826,7 +843,7 @@ let grabbedBay=null, docked=false;
 function lerpAng(a,b,k){ let d=(b-a)%(Math.PI*2); if(d>Math.PI)d-=Math.PI*2; if(d<-Math.PI)d+=Math.PI*2; return a+d*k; }
 function lerpDelta(a,b){ let d=(b-a)%(Math.PI*2); if(d>Math.PI)d-=Math.PI*2; if(d<-Math.PI)d+=Math.PI*2; return d; }
 // ---- cable physics (Verlet chain per bay, connector -> port/hand) ----
-const CABLE_SEGS=26, CABLE_LEN=4.1, CABLE_RANGE=3.4;
+const CABLE_SEGS=26, CABLE_LEN=4.2, CABLE_RANGE=4.0;
 function makeCable(){
   const pts=[], old=[];
   for(let i=0;i<=CABLE_SEGS;i++){ pts.push(new THREE.Vector3(0,1,-6)); old.push(new THREE.Vector3(0,1,-6)); }
@@ -865,6 +882,33 @@ function cableStep(cab, a, b, dt){
 }
 const PACK_KWH = 75; // kWh per full charge
 const TIERS = [ {kw:150,cost:0}, {kw:350,cost:800}, {kw:600,cost:2000} ];
+// ---- car segments: different packs, patience, fees ----
+const SEGMENTS = [
+  { id:'sedan', name:'Sedan',      pack:75,  patience:[150,240], fee:1.00, w:5, paint:null },
+  { id:'taxi',  name:'Taxi',       pack:60,  patience:[55,90],   fee:1.12, w:4, paint:0xf2b705 },
+  { id:'suv',   name:'SUV',        pack:95,  patience:[180,260], fee:0.95, w:3, paint:null },
+  { id:'van',   name:'Delivery van',pack:110,patience:[240,320], fee:0.88, w:2, paint:0xdfe4ea },
+  { id:'retro', name:'Retro classic',pack:40,patience:[120,180], fee:1.35, w:1, paint:0x8a2be2 },
+];
+function pickSegment(){
+  const h=Math.floor(gameClock/60);
+  let ws = SEGMENTS.map(s=> s.w * (s.id==='taxi' ? ((h>=6&&h<=9)||(h>=16&&h<=20)?2.2:0.7) : (s.id==='van' ? (h>=9&&h<=16?1.8:0.8) : 1)));
+  const tot=ws.reduce((a,b)=>a+b,0); let r=Math.random()*tot;
+  for(let i=0;i<SEGMENTS.length;i++){ r-=ws[i]; if(r<=0) return SEGMENTS[i]; }
+  return SEGMENTS[0];
+}
+// ---- reputation ----
+let rep = 60;                       // 0..100, arrival traffic scales with it
+const repMult = ()=> 0.45 + (rep/100)*1.15;   // 0.45x..1.6x arrival rate
+function repAdd(v){ rep=THREE.MathUtils.clamp(rep+v,0,100); }
+// ---- tech tree ----
+const TECH = {
+  heater:  { name:'Battery heater pads', cost:500,  desc:'Cold snaps no longer slow charging chemistry.' },
+  inverter:{ name:'Smart inverters',     cost:900,  desc:'+12% charge efficiency — cheaper sessions, more profit.' },
+  ads:     { name:'Advertising network', cost:700,  desc:'+25% arrivals from billboards & maps apps.' },
+  priority:{ name:'VIP priority lane',   cost:1100, desc:'VIP cars always get the next free bay instantly.' },
+};
+let techOwned = {};
 const BUFFER_COST=600, BUFFER_CAP=200, BUFFER_RATE_KWH_MIN=0.5; // buffer charge rate at cheap prices
 const SAVE_KEY='chargebay_save_v1';
 // ---- weather/events ----
@@ -988,6 +1032,12 @@ function onKey(e){
   if(e.code==='KeyB'){ buyBuffer(); }
   if(e.code==='KeyN'){ const t=currentTarget(); if(t&&t.bay.locked) unlockBay(t.bay); }
   if(e.code==='KeyP'){ saveGame(); toast('💾 Saved'); }
+  if(e.code==='KeyT'){ toggleTechMenu(); }
+  if(techOpen){
+    const idx=['Digit1','Digit2','Digit3','Digit4'].indexOf(e.code);
+    if(idx>=0){ const id=Object.keys(TECH)[idx]; buyTech(id); renderTech(); }
+    if(e.code==='Escape'){ toggleTechMenu(false); }
+  }
 }
 
 // controller
@@ -1006,7 +1056,7 @@ function enterTouch(){
 document.getElementById('playbtn').addEventListener('click',()=>{ SFX.resume(); if(isTouch) enterTouch(); else controls.lock(); COACH.maybeShow(); });
 startEl.addEventListener('click',(e)=>{ if(!isTouch && e.target.id!=='playbtn') controls.lock(); });
 controls.addEventListener('lock', ()=>{ startEl.style.display='none'; });
-controls.addEventListener('unlock', ()=>{ if(ready && !isTouch && !touchMode) startEl.style.display='flex'; });
+controls.addEventListener('unlock', ()=>{ if(ready && !isTouch && !touchMode && !techOpen) startEl.style.display='flex'; });
 // desktop: clicking the game view re-locks the mouse (fixes "mouse never locked")
 renderer.domElement.addEventListener('click',()=>{ SFX.resume(); if(ready && !isTouch && controls.isLocked===false) controls.lock(); });
 
@@ -1112,14 +1162,18 @@ function paySession(b){
   if((b.chargeKwh||0)>0.05){
     served++; servedTotal++;
     let fee=0; if(b.car && b.car.userData.vip){ fee=b.sessionRev*0.5; b.sessionRev+=fee; }
+    const segF=((b.car&&b.car.userData.seg&&b.car.userData.seg.fee)|| (b.segFee||1));
+    if(segF!==1 && !b.car?.userData?.vip){ b.sessionRev*=segF; }
     const prof=b.sessionRev-b.sessionCost; cash+=prof; dayRev+=b.sessionRev; dayCost+=b.sessionCost;
-    toast((b.car&&b.car.userData.vip?'👑 VIP tip +$'+fee.toFixed(2)+' · ':'')+'🎉 Complete +$'+b.sessionRev.toFixed(2)+' · profit <b>$'+prof.toFixed(2)+'</b>');
+    const segN=(b.car&&b.car.userData.seg&&b.car.userData.seg.name)||'Car';
+    repAdd( (b.car&&b.car.userData.vip)?2.5:1 );
+    toast((b.car&&b.car.userData.vip?'👑 VIP tip +$'+fee.toFixed(2)+' · ':'')+'🎉 '+segN+' complete +$'+b.sessionRev.toFixed(2)+' · profit <b>$'+prof.toFixed(2)+'</b>');
   }
   b.sessionRev=0; b.sessionCost=0;
 }
 function saveGame(){
   try{
-    const d={ v:1, cash, day, dayRev, dayCost, servedTotal, bufferOwned, bufferKwh,
+    const d={ v:1, cash, day, dayRev, dayCost, servedTotal, bufferOwned, bufferKwh, rep, techOwned,
       bays: bays.map(b=>({ tier:b.tier, locked:!!b.locked, sell:b.sell })), raining, gameClock, spotPrice, ts:Date.now(),
       vipPending, coldLeft: Math.max(0,coldUntil-performance.now()), brownLeft: Math.max(0,brownUntil-performance.now()), brownCap, solarKwh };
     localStorage.setItem(SAVE_KEY, JSON.stringify(d));
@@ -1130,7 +1184,7 @@ function loadGame(){
     const raw=localStorage.getItem(SAVE_KEY); if(!raw) return false;
     const d=JSON.parse(raw); if(!d||d.v!==1) return false;
     cash=d.cash??cash; day=d.day??day; dayRev=d.dayRev||0; dayCost=d.dayCost||0; servedTotal=d.servedTotal||0;
-    bufferOwned=!!d.bufferOwned; bufferKwh=d.bufferKwh||0; raining=d.raining??raining; gameClock=d.gameClock??gameClock; spotPrice=d.spotPrice??spotPrice;
+    bufferOwned=!!d.bufferOwned; bufferKwh=d.bufferKwh||0; raining=d.raining??raining; gameClock=d.gameClock??gameClock; spotPrice=d.spotPrice??spotPrice; rep=d.rep??rep; techOwned=d.techOwned||{};
     if(Array.isArray(d.bays)) d.bays.forEach((sb,i)=>{ if(bays[i]){ bays[i].tier=sb.tier||0; bays[i].locked=!!sb.locked; bays[i].sell=sb.sell||0.25; bays[i].kw=TIERS[bays[i].tier].kw; } });
     vipPending=!!d.vipPending; brownCap=d.brownCap||500; solarKwh=d.solarKwh||0;
     coldUntil=performance.now()+(d.coldLeft||0); brownUntil=performance.now()+(d.brownLeft||0);
@@ -1140,6 +1194,7 @@ function loadGame(){
 }
 function endDay(){
   day++;
+  repAdd(3); // overnight goodwill recovery
   const profit=dayRev-dayCost;
   showDaySummary(day-1, dayRev, dayCost, profit);
   dayRev=0; dayCost=0;
@@ -1159,7 +1214,7 @@ function tryInteract(){
     b.car.userData.docked=false; SFX.click(200);
     if((b.chargeKwh||0)>0.05){ paySession(b); toast('🔌 Unplugged — paid'); }
     else toast('🔌 Connector unplugged');
-    b.plug.position.copy(b.plugHome.pos); b.plug.rotation.copy(b.plugHome.rot);
+    b.plug.position.copy(b.plugHome.pos); b.plug.rotation.copy(b.plugHome.rot); setJacket(b, false);
     grabbedBay=null; return;
   }
   // holding this bay's connector in hand -> try to dock
@@ -1168,8 +1223,10 @@ function tryInteract(){
       const port=bayPort(b);
       if(port.distanceTo(camera.position)<2.2){
         docked=true; b.plugged=true; b.car.userData.docked=true; b.state='ready';
-        // snap plug onto the port nozzle-in; hands free -> can service other bays while charging
-        b.plug.position.copy(port); b.plug.position.y+=0.05; b.plug.rotation.set(0,0,Math.PI/2);
+        // snap plug nozzle into port: model nozzle -Y -> world +X = 120deg about (1,1,1)
+        b.plug.position.copy(port); b.plug.position.y+=0.02;
+        // nozzle is model -Y; Rz(-90) sends -Y -> -X = straight into the side port
+        b.plug.quaternion.set(0,0,-0.7071068,0.7071068);
         autoEnergize(b);
         grabbedBay=null; docked=false;
         SFX.latch(); toast('✅ Locked — charging'); return;
@@ -1194,6 +1251,7 @@ function tryInteract(){
   if(t.type==='charger' && b.plugged && !grabbedBay){ toast('⚡ Bay already charging'); }
 }
 
+function setJacket(b, on){ if(!b.plug) return; b.plug.traverse(o=>{ if(o.isMesh&&o.material&&o.material.name==='CableJacket') o.visible=on; }); }
 function autoEnergize(b){
   // plug-and-pay: docking the connector starts the session immediately
   if(b.plugged && b.state==='ready'){ b.state='charging'; b.price=spotPrice; b.sell=sellPrice(); b.kwhStart=0; b.chargeKwh=0; b.sessionCost=0; SFX.click(420); toast('⚡ Charging at '+b.kw+' kW'); }
@@ -1300,7 +1358,8 @@ function animate(){
     if(b.locked) continue;
     if(b.state==='empty' && b.nextArrT && now>=b.nextArrT){
       spawnCar(b, false, vipPending && !vipSpawned); if(vipPending) vipSpawned=true;
-      b.nextArrT = now + (12000 - Math.min(8000, spotPrice*40000)) * (0.6+Math.random()*0.8);
+      const adsBoost = techOwned.ads?0.75:1;      // ad network: arrivals 25% sooner
+      b.nextArrT = now + (12000 - Math.min(8000, spotPrice*40000)) * (0.6+Math.random()*0.8) / repMult() * adsBoost;
 
     }
   }
@@ -1315,7 +1374,7 @@ function animate(){
       brownUntil=now+45000; brownCap= bays.filter(x=>!x.locked).length>2? 500:350; SFX.chime(330,240); toast('⚠️ Brownout · grid capped at '+brownCap+' kW');
     } else if(r<0.82){ // VIP stranded car: urgent, big tip
       vipPending=true; vipSpawned=false; toast('👑 VIP stranded outside town — needs rescue charge!');
-      bays.forEach(b=>{ if(!b.locked && b.state==='empty') b.nextArrT = Math.min(b.nextArrT||0, now+4000); });
+      bays.forEach(b=>{ if(!b.locked && b.state==='empty') b.nextArrT = Math.min(b.nextArrT||0, now+(techOwned.priority?1200:4000)); });
     } else { // weather shift
       raining = Math.random()<0.5? 0.15+Math.random()*0.2 : 0.65+Math.random()*0.35;
     }
@@ -1381,7 +1440,7 @@ function animate(){
       const show = b.state==='charging';
       b.barG.visible=show;
       if(show){
-        b.barG.position.set(b.car.position.x, 2.05, b.car.position.z);
+        b.barG.position.set(b.car.position.x, b.barH||2.05, b.car.position.z);
         b.barG.lookAt(camera.position);
         const pct=Math.min(1,b.car.userData.battery);
         b.barFill.scale.x=Math.max(0.001,pct);
@@ -1394,8 +1453,9 @@ function animate(){
     if(b.state==='charging' && b.car){
       // brownout throttle: if adding this bay exceeds cap, pause the newest charger
       if(totalKw + b.kw > brownCap && now<brownUntil){ b.state='ready'; b.throttled=true; SFX.click(160); toast('⚠️ Bay throttled — brownout cap '+brownCap+' kW'); continue; }
-      const add = dt*(b.kw/350)*0.02*(now<coldUntil?0.65:1); // cold slows chemistry
-      const kwh = add*PACK_KWH;
+      const coldMul = (now<coldUntil && !techOwned.heater)?0.65:1;
+      const add = dt*(b.kw/350)*0.02*coldMul; // cold slows chemistry (heater tech negates)
+      const kwh = add*(b.car.userData.packKwh||PACK_KWH);
       b.car.userData.battery=Math.min(1,b.car.userData.battery+add);
       b.chargeKwh=(b.chargeKwh||0)+kwh;
       totalKw+=b.kw;
@@ -1403,11 +1463,12 @@ function animate(){
       let fromSol=Math.min(kwh, solarKwh); solarKwh-=fromSol;
       let fromBuf=Math.min(kwh-fromSol, bufferOwned? bufferKwh:0);
       bufferKwh-=fromBuf; if(fromBuf>0) bufferDraining+=fromBuf;
-      const fromGrid=kwh-fromBuf;
+      let fromGrid=kwh-fromBuf;
+      if(techOwned.inverter) fromGrid*=0.88;   // smart inverters: 12% less grid draw
       const cost = fromGrid*spotPrice;
       b.sessionCost=(b.sessionCost||0)+cost;
       const rev = kwh*b.sell; revenue+=rev; b.sessionRev+=rev;
-      if(b.car.userData.battery>=1){ b.state='departing'; b.plugged=false; b.plug.position.copy(b.plugHome.pos); b.plug.rotation.copy(b.plugHome.rot); SFX.cash(); paySession(b); }
+      if(b.car.userData.battery>=1){ b.state='departing'; b.plugged=false; b.plug.position.copy(b.plugHome.pos); b.plug.rotation.copy(b.plugHome.rot); setJacket(b,false); SFX.cash(); paySession(b); }
       // plug LED: pulse ring — scale plug emissive via material hack
       if(b.plug){ b.plug.traverse(o=>{ if(o.isMesh&&o.material&&o.material.emissive) o.material.emissiveIntensity = 6+Math.sin(now/120)*4; }); }
     }
@@ -1450,13 +1511,15 @@ function animate(){
     // patience: idle parked/held car leaves
     if((b.state==='parked'||b.state==='ready') && b.car && !b.car.userData.docked){
       const waited=(now-b.car.userData.arrived)/1000;
-      if(waited>b.car.userData.patience){ b.state='departing'; SFX.chime(300,220); SFX.departHorn(); toast('😠 Left without charging'); }
+      if(waited>b.car.userData.patience){ b.state='departing'; SFX.chime(300,220); SFX.departHorn(); repAdd(-(b.car.userData.vip?5:2.5)); toast('😠 '+(b.car.userData.seg?b.car.userData.seg.name:'Car')+' left without charging · rep −'+(b.car.userData.vip?5:2.5)); }
     }
   }
   if(totalKw>0) SFX.setCharge(true, totalKw/350); else SFX.setCharge(false);
   loadEl.textContent = totalKw+' kW';
   if(cashEl){ cashEl.textContent='$'+cash.toFixed(2); cashEl.className = cash>=0?'good':'bad'; }
   if(dayEl) dayEl.textContent=day;
+  const repEl=document.getElementById('rep');
+  if(repEl){ repEl.textContent='★ '+Math.round(rep); repEl.className = rep>=70?'good':(rep>=40?'':'bad'); }
   if(bufEl) bufEl.textContent = (bufferOwned? Math.round(bufferKwh)+' / '+BUFFER_CAP+' kWh':'—') + (solarLast>0.02? ' · ☀ '+Math.round(solarLast*SOLAR_CAP_KW)+' kW':'');
   revEl.textContent = '$'+revenue.toFixed(2);
   servedEl.textContent = served;
@@ -1465,7 +1528,7 @@ function animate(){
   if(grabbedBay && !docked){
     const tp=new THREE.Vector3(); camera.getWorldDirection(tp);
     let target=camera.position.clone().addScaledVector(tp,0.55).add(new THREE.Vector3(0.12,-0.18,0));
-    const home=grabbedBay.plugHome.pos;
+    const home=grabbedBay.glandPos||grabbedBay.plugHome.pos;
     const reach=target.clone().sub(home);
     if(reach.length()>CABLE_RANGE){ reach.setLength(CABLE_RANGE); target=home.clone().add(reach); grabbedBay.plugTaut=true; }
     else grabbedBay.plugTaut=false;
@@ -1473,10 +1536,10 @@ function animate(){
     const look=target.clone().add(tp);
     grabbedBay.plug.lookAt(look);
   }
-  // per-bay cables: end A = holster, end B = plug (hand/port/home)
+  // per-bay cables: end A = gland on cabinet, end B = plug (hand/port/ring)
   for(const b of bays){
     if(!b.cable) continue;
-    const a=b.plugHome.pos;
+    const a=b.glandPos;
     let cB;
     if(b.plugged && b.car && b.state!=='departing'){ cB=bayPort(b).add(new THREE.Vector3(0,0.05,0)); }
     else cB=b.plug.position;
@@ -1593,6 +1656,17 @@ window.__GAME = {
   camPos(){ return {x:+camera.position.x.toFixed(2), y:+camera.position.y.toFixed(2), z:+camera.position.z.toFixed(2)}; },
   setBatt(i,v){ if(bays[i].car){ bays[i].car.userData.battery=v; return 'ok'; } return 'nocar'; },
   q(){ return {mode:Q.mode, fps:diag.fps, pxr:renderer.getPixelRatio?+renderer.getPixelRatio().toFixed(2):null}; },
+  techState(){ return Object.assign({}, techOwned); },
+  techbuy(id){ return buyTech(id); },
+  setCash(v){ cash=v; return cash; },
+  repGet(){ return rep; },
+  techmenu(force){ toggleTechMenu(force); return techOpen; },
+  aimPort(i){ const b=bays[i]; if(!b.car) return 'nocar'; const p=bayPort(b); camera.position.set(p.x+1.35, p.y+0.15, p.z+0.45); camera.lookAt(p); return 'ok'; },
+  portPos(i){ const b=bays[i]; if(!b.car) return null; const p=bayPort(b); return {x:+p.x.toFixed(2),y:+p.y.toFixed(2),z:+p.z.toFixed(2)}; },
+  cableView(i){ const b=bays[i]; if(!b.car||!b.glandPos) return 'nodata'; const p=bayPort(b); const mid=p.clone().add(b.glandPos).multiplyScalar(0.5); const dir=p.clone().sub(b.glandPos); const side=new THREE.Vector3(-dir.z,0,dir.x).normalize(); camera.position.copy(mid).add(side.multiplyScalar(1.6)).add(new THREE.Vector3(0,0.55,0)); camera.lookAt(mid); return 'ok'; },
+  aimCharger(i){ const b=bays[i]; camera.position.set(b.x+1.9, 1.15, -4.3); const look=new THREE.Vector3(b.x,0.95,-6.0); camera.lookAt(look); return 'ok'; },
+  hidecars(v){ bays.forEach(b=>{ if(b.car) b.car.visible=!v; }); return 'ok'; },
+  onlycharger(i){ scene.traverse(o=>{ if(o.isMesh) o.visible=false; }); bays.forEach((b,j)=>{ if(b.charger){ b.charger.visible=(j===i); b.charger.traverse(o=>{ if(o.isMesh) o.visible=(j===i); }); } if(b.plug) b.plug.visible=(j===i); }); return 'ok'; },
   qset(m){ qApply(m); return Q.mode; },
   solar(){ return {last:+solarLast.toFixed(2), stored:+solarKwh.toFixed(2), capKW:SOLAR_CAP_KW}; },
   // ---- soak-test hooks: drive the REAL interaction path ----
@@ -1640,6 +1714,25 @@ const COACH = (function(){
   return { init, maybeShow, tick, hide };
 })();
 COACH.init();
+// ---------------- tech menu ----------------
+let techOpen=false;
+const TECH_ICONS={heater:'🌡️',inverter:'⚙️',ads:'📡',priority:'👑'};
+function renderTech(){
+  const box=document.getElementById('techlist');
+  box.innerHTML=Object.keys(TECH).map((id,i)=>{
+    const tc=TECH[id], own=!!techOwned[id];
+    const afford=cash>=tc.cost;
+    return '<div class="tcard'+(own?' owned':'')+'"><div class="ticon">'+(TECH_ICONS[id]||'🔬')+'</div><div class="tinfo"><b>'+(i+1)+'. '+tc.name+'</b><p>'+tc.desc+'</p></div>'+(own?'<button class="tbuy owned" disabled>OWNED</button>':'<button class="tbuy" data-tech="'+id+'" '+(afford?'':'disabled')+'>$'+tc.cost+'</button>')+'</div>';
+  }).join('');
+  box.querySelectorAll('[data-tech]').forEach(btn=>btn.addEventListener('click',()=>{ buyTech(btn.dataset.tech); renderTech(); }));
+}
+function toggleTechMenu(force){
+  techOpen = force!==undefined? force : !techOpen;
+  const el=document.getElementById('tech');
+  el.style.display= techOpen? 'flex':'none';
+  if(techOpen){ renderTech(); if(!isTouch) controls.unlock(); }
+  else if(!isTouch && !touchMode) controls.lock();
+}
 initLensFx();
 loadAssets().catch(e=>{ console.error('asset load failed', e && e.type, e && e.message); ready=true; if(!envReady) envReady=true; });
 setInterval(()=>{ if(ready) saveGame(); }, 30000);

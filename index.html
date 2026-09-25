@@ -44,6 +44,20 @@
   .tbtn{position:absolute;right:22px;width:74px;height:74px;border-radius:50%;background:rgba(13,34,51,.6);border:1px solid #8fe3ff66;color:#dff4ff;font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;-webkit-user-select:none;touch-action:none;}
   #tE{bottom:110px;} #tR{bottom:24px; right:110px;} #tM{bottom:110px; right:110px; width:48px; height:48px; font-size:16px; opacity:.85;}
   #lensfx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:0;mix-blend-mode:screen;transition:opacity 1.2s;}
+  #tech{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(4,8,14,.55);z-index:14;}
+  #techbox{background:rgba(8,14,22,.94);border:1px solid rgba(120,220,255,.35);border-radius:14px;padding:20px 26px;width:min(560px,92vw);max-height:86vh;overflow:auto;}
+  #techbox h2{margin:0 0 12px;font-size:15px;letter-spacing:.18em;color:#8fe3ff;}
+  .tcard{display:flex;align-items:center;gap:14px;padding:10px 12px;margin:8px 0;border:1px solid rgba(120,180,220,.18);border-radius:10px;background:rgba(16,26,38,.6);}
+  .tcard.owned{border-color:rgba(105,240,160,.5);opacity:.75;}
+  .ticon{font-size:26px;width:38px;text-align:center;}
+  .tinfo{flex:1;}
+  .tinfo b{color:#e8f4ff;font-size:13px;letter-spacing:.05em;}
+  .tinfo p{margin:2px 0 0;font-size:11.5px;color:#8fa8bc;line-height:1.4;}
+  .tbuy{background:linear-gradient(180deg,#1d7a55,#145c40);border:1px solid #35e07c66;color:#d6ffe9;font-size:12px;font-weight:700;padding:8px 14px;border-radius:8px;cursor:pointer;white-space:nowrap;}
+  .tbuy:disabled{background:#22303c;border-color:#33455288;color:#5e7688;cursor:default;}
+  .tbuy.owned{background:none;border-color:#69f0a055;color:#69f0a0;}
+  #techfoot{margin-top:12px;text-align:right;}
+  #techx{background:none;border:1px solid rgba(140,220,255,.3);color:#8fb8cc;font-size:12px;padding:7px 18px;border-radius:6px;cursor:pointer;letter-spacing:.1em;}
   #coach{position:absolute;inset:0;display:none;align-items:flex-start;justify-content:flex-start;pointer-events:none;z-index:12;}
   #coachbox{pointer-events:auto;background:rgba(8,14,22,.7);border:1px solid rgba(120,220,255,.32);border-radius:12px;padding:14px 18px;backdrop-filter:blur(6px);width:min(360px,64vw);position:absolute;left:50%;transform:translateX(-50%);bottom:5%;}
   #coachbox h2{margin:0 0 8px;font-size:13px;letter-spacing:.14em;color:#8fe3ff;font-weight:600;}
@@ -86,10 +100,18 @@
     <div class="row"><span>Cash</span><b id="cash">$500.00</b></div>
     <div class="row"><span>Day</span><b id="day">1</b></div>
     <div class="row"><span>Buffer</span><b id="buf">—</b></div>
+    <div class="row"><span>Rep</span><b id="rep">★ 60</b></div>
   </div>
   <div id="prompt">Press <b>E</b></div>
   <div id="crosshair"></div>
   <div id="toast"></div>
+  <div id="tech">
+    <div id="techbox">
+      <h2>TECH TREE</h2>
+      <div id="techlist"></div>
+      <div id="techfoot"><button id="techx">CLOSE (T)</button></div>
+    </div>
+  </div>
   <div id="coach">
     <div id="coachbox">
       <h2 id="coachtitle">SHIFT 1 · WALK THE LOT</h2>
@@ -110,7 +132,7 @@
   <div id="start">
     <h1>⚡ CHARGEBAY</h1>
     <p>Dusk. Rain's coming. Pull up, grab the connector, and get these cars charged.</p>
-    <p style="font-size:13px;opacity:.8">WASD move · Mouse look · <b>E</b> grab/plug in (charging starts) · <b>R</b> pause/resume · <b>U</b> upgrade charger · <b>N</b> unlock bay · <b>B</b> buy battery buffer · <b>G</b> quality · <b>P</b> save · <b>M</b> mute</p>
+    <p style="font-size:13px;opacity:.8">WASD move · Mouse look · <b>E</b> grab/plug in (charging starts) · <b>R</b> pause/resume · <b>U</b> upgrade charger · <b>N</b> unlock bay · <b>B</b> buy battery buffer · <b>G</b> quality · <b>T</b> tech · <b>P</b> save · <b>M</b> mute</p>
     <button id="playbtn">ENTER THE BAY</button>
   </div>
 </div>
