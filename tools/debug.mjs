@@ -18,7 +18,7 @@ page.on('pageerror', e=>console.log('[pageerror]', String(e && e.stack || e)));
 page.on('requestfailed', r=>console.log('[reqfail]', r.url(), String(r.failure()&&r.failure().errorText)));
 page.on('response', r=>{ if(r.status()>=400) console.log('[http'+r.status()+']', r.url()); });
 await page.goto(`http://127.0.0.1:${PORT}/`, {waitUntil:'load', timeout:60000});
-await new Promise(r=>setTimeout(r,15000));
+await new Promise(r=>setTimeout(r,90000));
 console.log('READY?', await page.evaluate('!!(window.__GAME && window.__GAME.ready())'));
 await page.screenshot({path: path.join(ROOT,'scratch/debug.png')});
 await browser.close(); server.close(); process.exit(0);

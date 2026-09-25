@@ -10,7 +10,7 @@ const OUT = process.argv[2] || path.join(ROOT, 'progress/artifacts/last.png');
 const POSE = process.env.POSE ? JSON.parse(process.env.POSE) : null; // {x,y,z,ry} | [{x,y,z,ry},...]
 const WAIT = Number(process.env.WAIT || 4500);
 
-const MIME = { '.html':'text/html', '.js':'text/javascript', '.mjs':'text/javascript', '.glb':'model/gltf-binary', '.hdr':'image/vnd.radiance', '.png':'image/png', '.json':'application/json' };
+const MIME = { '.html':'text/html', '.js':'text/javascript', '.mjs':'text/javascript', '.glb':'model/gltf-binary', '.gltf':'model/gltf+json', '.bin':'application/octet-stream', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.png':'image/png', '.hdr':'image/vnd.radiance', '.json':'application/json' };
 const server = http.createServer((req,res)=>{
   let p = decodeURIComponent(req.url.split('?')[0]);
   if (p === '/') p = '/index.html';
@@ -25,18 +25,19 @@ await new Promise(r=>server.listen(PORT, r));
 
 const browser = await puppeteer.launch({
   executablePath: '/usr/bin/chromium',
-  args: ['--no-sandbox','--disable-gpu','--use-gl=angle','--use-angle=vulkan','--enable-unsafe-swiftshader','--disable-dev-shm-usage'],
+  args: ['--no-sandbox','--use-gl=angle','--use-angle=vulkan','--enable-unsafe-swiftshader','--disable-dev-shm-usage'],
   defaultViewport: { width: 1280, height: 720 },
 });
 const page = await browser.newPage();
 const errors = [];
-page.on('console', m => { if (m.type()==='error') errors.push('[console] '+m.text()); });
+page.on('console', m => { if (m.type()==='error' && !m.text().includes('favicon')) errors.push('[console] '+m.text()); });
 page.on('pageerror', e => errors.push('[pageerror] '+String(e && e.message || e)));
 
 await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'load', timeout: 60000 });
 try {
-  await page.waitForFunction('window.__GAME && window.__GAME.ready() && window.__GAME.envReady()', { timeout: 60000 });
+  await page.waitForFunction('window.__GAME && window.__GAME.ready()', { timeout: 90000 });
 } catch(e) { errors.push('[timeout] game never became ready'); }
+await page.evaluate('(()=>{ const s=document.getElementById("start"); if(s) s.style.display="none"; })()');
 await new Promise(r=>setTimeout(r, WAIT));
 
 const poses = POSE ? (Array.isArray(POSE)?POSE:[POSE]) : [{x:2.2,y:1.65,z:7.5,ry:0}];
@@ -45,7 +46,7 @@ const base = OUT.replace(/\.png$/,'');
 const states = [];
 for (let i=0;i<poses.length;i++){
   const p = poses[i];
-  await page.evaluate(`window.__GAME.pose(${p.x},${p.y},${p.z},${p.ry||0}); window.__GAME.weather(${p.rain ?? 0.7});`);
+  await page.evaluate(`window.__GAME.pose(${p.x},${p.y},${p.z},${p.ry||0},${p.rx||0}); window.__GAME.weather(${p.rain ?? 0.7});`);
   await new Promise(r=>setTimeout(r, 900));
   const out = poses.length>1 ? `${base}_${i+1}.png` : OUT;
   await page.screenshot({ path: out });

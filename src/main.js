@@ -30,14 +30,14 @@ const DAY = { t: 0.78 }; // 0..1, dusk ~0.75-0.82
 
 // PMREM env for PBR reflections
 let envReady=false;
-new RGBELoader().load('assets/hdri/dusk2.hdr', (hdr)=>{
+new RGBELoader().load('assets/hdri/sunset.hdr', (hdr)=>{
   const pmrem = new THREE.PMREMGenerator(renderer);
   pmrem.compileEquirectangularShader();
   const env = pmrem.fromEquirectangular(hdr).texture;
   scene.environment = env;
   scene.background = env;
-  scene.backgroundIntensity = 0.5;
-  if('environmentIntensity' in scene) scene.environmentIntensity = 1.9;
+  scene.backgroundIntensity = 0.6;
+  if('environmentIntensity' in scene) scene.environmentIntensity = 1.1;
   hdr.dispose(); pmrem.dispose();
   sky.visible = false;
   // force IBL response on all standard materials (incl clearcoat on hero car)
@@ -48,7 +48,7 @@ new RGBELoader().load('assets/hdri/dusk2.hdr', (hdr)=>{
     }
   });
   envReady = true;
-}, undefined, (err)=>{ console.warn('hdri failed, shader sky fallback', err); refreshSkyEnv(); });
+}, undefined, (err)=>{ console.warn('hdri failed, shader sky fallback', err); refreshSkyEnv(); envReady = true; });
 function refreshSkyEnv(){
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envScene = new THREE.Scene();
@@ -102,13 +102,14 @@ function applyDaylight(){
   u.sunCol.value.copy(sun);
   u.sunDir.value.set(-0.85, 0.06, -0.5).normalize();
   fog.color.setHSL(0.72, 0.30, 0.22);
-  renderer.toneMappingExposure = 1.24;
+  renderer.toneMappingExposure = 0.85;
 }
 applyDaylight();
 setTimeout(()=>{ if(!envReady) refreshSkyEnv(); }, 50);
 
 // lights
-const hemi = new THREE.HemisphereLight(0x4a5c88, 0x33261a, 1.6); scene.add(hemi);
+const hemi = new THREE.HemisphereLight(0x38456b, 0x241b12, 0.55); scene.add(hemi);
+const rake = new THREE.DirectionalLight(0xff9a55, 2.6); rake.position.set(-28, 3.2, -18); scene.add(rake);
 const sun = new THREE.DirectionalLight(0xff9a4d, 3.2);
 sun.position.set(-30, 9, -14);
 sun.castShadow = true;
@@ -135,11 +136,11 @@ function asphaltTextures(){
     for(let k=0;k<8;k++){ x+=(Math.random()-0.5)*120; y+=(Math.random()-0.5)*120; g.lineTo(x,y);} g.stroke();
   }
   const colorTex = new THREE.CanvasTexture(c);
-  colorTex.wrapS=colorTex.wrapT=THREE.RepeatWrapping; colorTex.repeat.set(28,28);
+  colorTex.wrapS=colorTex.wrapT=THREE.RepeatWrapping; colorTex.repeat.set(6,6);
   // roughness map with puddle blobs
   const r = document.createElement('canvas'); r.width=r.height=1024;
   const rg = r.getContext('2d');
-  rg.fillStyle='#7a7a7a'; rg.fillRect(0,0,1024,1024); // damp mid rough
+  rg.fillStyle='#3c3c3c'; rg.fillRect(0,0,1024,1024); // wet-biased rough base
   for(let i=0;i<9;i++){ // puddles -> near mirror
     const px=Math.random()*1024, py=Math.random()*1024;
     const rad=60+Math.random()*160;
@@ -152,7 +153,7 @@ function asphaltTextures(){
   }
   for(let i=0;i<9000;i++){ const v=100+Math.random()*90; rg.fillStyle=`rgba(${v},${v},${v},0.35)`; rg.fillRect(Math.random()*1024,Math.random()*1024,2,2);}
   const roughTex = new THREE.CanvasTexture(r);
-  roughTex.wrapS=roughTex.wrapT=THREE.RepeatWrapping; roughTex.repeat.set(14,14);
+  roughTex.wrapS=roughTex.wrapT=THREE.RepeatWrapping; roughTex.repeat.set(10,10);
   return {colorTex, roughTex};
 }
 const {colorTex:asphaltColor, roughnessMap:asphaltRough} = asphaltTextures();
@@ -165,7 +166,7 @@ function asphaltNormal(){
     const r=128+(Math.random()-0.5)*70, gr=128+(Math.random()-0.5)*70;
     g.fillStyle=`rgb(${r|0},${gr|0},240)`; g.fillRect(x,y,s,s);
   }
-  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(8,8); return t;
+  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(2,2); return t;
 }
 const asphaltNormalTex = asphaltNormal();
 function puddleMaskStatic(){
@@ -184,18 +185,23 @@ function puddleMaskStatic(){
 }
 const asphalt = new THREE.Mesh(
   new THREE.PlaneGeometry(220,220),
-  new THREE.MeshStandardMaterial({ map:asphaltColor, alphaMap: puddleMaskStatic(), roughnessMap:asphaltRough, normalMap:asphaltNormalTex, normalScale:new THREE.Vector2(0.85,0.85), roughness:1.0, metalness:0.1, color:0x70767f, envMapIntensity:0.5, transparent:true })
+  (()=>{ const tl=new THREE.TextureLoader(); const MAXA=renderer.capabilities.getMaxAnisotropy();
+  const amap=tl.load('assets/ground/col.jpg'); amap.colorSpace=THREE.SRGBColorSpace; amap.wrapS=amap.wrapT=THREE.RepeatWrapping; amap.repeat.set(22,22); amap.anisotropy=Math.max(8,MAXA);
+  const rmap=tl.load('assets/ground/rgh.jpg'); rmap.wrapS=rmap.wrapT=THREE.RepeatWrapping; rmap.repeat.set(22,22); rmap.anisotropy=Math.max(8,MAXA);
+  const nmap=tl.load('assets/ground/nrm.jpg'); nmap.wrapS=nmap.wrapT=THREE.RepeatWrapping; nmap.repeat.set(22,22); nmap.anisotropy=Math.max(8,MAXA);
+  return new THREE.MeshStandardMaterial({ map:amap, roughnessMap:rmap, roughness:0.38, normalMap:nmap, normalScale:new THREE.Vector2(0.8,-0.8), metalness:0.2, color:0x6b727c, envMapIntensity:2.2 });
+})()
 );
 asphalt.rotation.x = -Math.PI/2; asphalt.receiveShadow = true; asphalt.renderOrder=1; scene.add(asphalt);
 
 // painted parking bay lines
 function bayLines(){
   const grp = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({color:0x9a968c, roughness:0.8, metalness:0.0});
-  const matY = new THREE.MeshStandardMaterial({color:0x9c8f3c, roughness:0.8, metalness:0.0});
+  const mat = new THREE.MeshStandardMaterial({color:0xe8e4d4, roughness:0.6, metalness:0.0, emissive:0x3a3628});
+  const matY = new THREE.MeshStandardMaterial({color:0xd4bd58, roughness:0.7, metalness:0.0, emissive:0x1c1808});
   for(let i=0;i<4;i++){
     const x = -6.6 + i*4.4;
-    const l = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 6.2), mat);
+    const l = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 6.2), mat);
     l.rotation.x=-Math.PI/2; l.position.set(x-2.2, 0.012, -3.1); l.receiveShadow=true; grp.add(l);
     const rr = l.clone(); rr.position.x = x+2.2; grp.add(rr);
   }
@@ -205,6 +211,27 @@ function bayLines(){
   return grp;
 }
 scene.add(bayLines());
+
+// oil stains / patch repairs to break asphalt uniformity
+function blobTex(dark){
+  const c=document.createElement('canvas'); c.width=c.height=256; const g=c.getContext('2d');
+  for(let i=0;i<14;i++){
+    const x=128+(Math.random()-0.5)*120,y=128+(Math.random()-0.5)*120,r=18+Math.random()*70;
+    const grd=g.createRadialGradient(x,y,0,x,y,r);
+    grd.addColorStop(0,dark); grd.addColorStop(1,'rgba(0,0,0,0)');
+    g.fillStyle=grd; g.beginPath(); g.ellipse(x,y,r,r*0.7,Math.random()*3,0,Math.PI*2); g.fill();
+  }
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t;
+}
+const oilTex=blobTex('rgba(10,9,8,0.55)');
+const patchTex=blobTex('rgba(70,66,60,0.5)');
+(function(){
+  const spots=[[-5.2,2.4,oilTex,1.8],[3.1,3.6,oilTex,1.4],[0.4,0.6,oilTex,1.1],[-1.8,4.4,patchTex,2.2],[6.2,1.2,patchTex,1.6],[-7.4,3.0,patchTex,1.9]];
+  for(const [x,z,tex,s] of spots){
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(s*1.6,s*1.3), new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:0.9,depthWrite:false}));
+    m.rotation.x=-Math.PI/2; m.position.set(x,0.011,z+1.2); m.rotation.z=Math.random()*6; m.renderOrder=2; scene.add(m);
+  }
+})();
 
 // wet-ground light streaks: additive gradient quads under each light
 function streakTexture(color){
@@ -226,27 +253,26 @@ const streaks = new THREE.Group();
 {
   const cyanTex = streakTexture('rgba(140,220,255,C1)');
   const warmTex = streakTexture('rgba(255,215,160,C1)');
-  const redTex  = streakTexture('rgba(255,60,50,C1)');
+  const redTex  = streakTexture('rgba(255,80,60,C1)');
   // under canopy front LED -> long streak toward camera
-  const s1 = new THREE.Mesh(new THREE.PlaneGeometry(18,7), new THREE.MeshBasicMaterial({map:cyanTex,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.22}));
+  const s1 = new THREE.Mesh(new THREE.PlaneGeometry(18,7), new THREE.MeshBasicMaterial({map:cyanTex,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.12}));
   s1.rotation.x=-Math.PI/2; s1.position.set(0,0.014,-2.8); s1.renderOrder=3; streaks.add(s1);
   // under each charger screen
   BAYS.forEach(x=>{
-    const s=new THREE.Mesh(new THREE.PlaneGeometry(0.7,3.4), new THREE.MeshBasicMaterial({map:cyanTex,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.28}));
+    const s=new THREE.Mesh(new THREE.PlaneGeometry(0.7,3.4), new THREE.MeshBasicMaterial({map:cyanTex,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.14}));
     s.rotation.x=-Math.PI/2; s.position.set(x,0.015,-4.4); streaks.add(s);
   });
   // sunset wash streak near road edge
-  const sw=new THREE.Mesh(new THREE.PlaneGeometry(30,5), new THREE.MeshBasicMaterial({map:warmTex,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.16}));
+  const sw=new THREE.Mesh(new THREE.PlaneGeometry(30,5), new THREE.MeshBasicMaterial({map:warmTex,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.10}));
   sw.rotation.x=-Math.PI/2; sw.rotation.z=Math.PI/2; sw.position.set(0,0.013,9.0); streaks.add(sw);
 }
 scene.add(streaks);
 
-// masked planar reflector: shows through puddle holes cut in the asphalt
 const mirror = new Reflector(new THREE.PlaneGeometry(160,160), {
-  clipBias: 0.004, textureWidth: 1024, textureHeight: 1024, color: 0x0e1116
+  clipBias: 0.004, textureWidth: 2048, textureHeight: 2048, color: 0x232830
 });
 mirror.rotation.x=-Math.PI/2; mirror.position.y=0.004; mirror.renderOrder=0;
-scene.add(mirror);
+mirror.visible=false; scene.add(mirror);
 // mask so reflector only shows through puddles: puddle-alpha canvas plane above
 function puddleMask(){
   const c=document.createElement('canvas'); c.width=c.height=512;
@@ -275,12 +301,24 @@ function rippleNormal(){
   }
   const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(40,40); return t;
 }
-const ripple = new THREE.Mesh(
-  new THREE.PlaneGeometry(220,220),
-  new THREE.MeshPhongMaterial({ color:0x05070a, specular:0x8899aa, shininess:140, transparent:true, opacity:0.34, depthWrite:false, side:THREE.DoubleSide })
-);
-ripple.material.alphaMap = puddleMask(); ripple.material.normalMap = rippleNormal(); ripple.material.normalScale = new THREE.Vector2(0.45,0.45);
-ripple.rotation.x=-Math.PI/2; ripple.position.y=0.007; ripple.renderOrder=2; scene.add(ripple);
+function softWetMask(){
+  // single large radial feather: fully transparent (mirror visible) at lot center, opaque asphalt far out
+  const c=document.createElement('canvas'); c.width=c.height=1024;
+  const g=c.getContext('2d');
+  g.fillStyle='rgba(255,255,255,1)'; g.fillRect(0,0,1024,1024);
+  g.filter='blur(40px)';
+  const rg=g.createRadialGradient(512,512,0,512,512,520);
+  rg.addColorStop(0,'rgba(0,0,0,0.95)'); rg.addColorStop(0.55,'rgba(0,0,0,0.75)'); rg.addColorStop(1,'rgba(0,0,0,0)');
+  g.globalCompositeOperation='destination-out'; g.fillStyle=rg; g.fillRect(0,0,1024,1024);
+  for(let i=0;i<160;i++){
+    const x=Math.random()*1024,y=Math.random()*1024,r=40+Math.random()*180;
+    const grd=g.createRadialGradient(x,y,0,x,y,r);
+    const v=Math.floor(20+Math.random()*120);
+    grd.addColorStop(0,`rgba(${v},${v},${v},0.55)`); grd.addColorStop(1,'rgba(235,235,235,0)');
+    g.fillStyle=grd; g.beginPath(); g.ellipse(x,y,r,r*0.7,Math.random()*3,0,Math.PI*2); g.fill();
+  }
+  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.ClampToEdgeWrapping; t.repeat.set(1,1); return t;
+}
 
 // ---------------- canopy with LEDs + solar ----------------
 function buildCanopy(){
@@ -288,7 +326,8 @@ function buildCanopy(){
   const steel = new THREE.MeshStandardMaterial({color:0x363a42, metalness:0.9, roughness:0.32, envMapIntensity:2.0});
   const dark  = new THREE.MeshStandardMaterial({color:0x22262e, metalness:0.55, roughness:0.45, envMapIntensity:1.8});
   const solar = new THREE.MeshStandardMaterial({color:0x0a1226, metalness:0.85, roughness:0.15, envMapIntensity:2.2});
-  const led = new THREE.MeshStandardMaterial({color:0x0a141c, emissive:0x86b8d8, emissiveIntensity:1.1});
+  const led = new THREE.MeshStandardMaterial({color:0x0a141c, emissive:0x86b8d8, emissiveIntensity:0.65});
+  const fill = new THREE.PointLight(0xffdcb0, 12, 22, 1.8); fill.position.set(0,3.9,-3.0); g.add(fill);
   const ledW = new THREE.MeshStandardMaterial({color:0x0c1410, emissive:0x9fc8b4, emissiveIntensity:0.7});
   // roof slab
   const roof = new THREE.Mesh(new THREE.BoxGeometry(20.4,0.28,9.2), dark);
@@ -326,6 +365,8 @@ function buildCanopy(){
     const sp = new THREE.SpotLight(0xffe3bd, 45, 12, Math.PI/3.4, 0.7, 1.6);
     sp.position.set(x,4.4,-3.0); sp.target.position.set(x,0,-3.0);
     sp.castShadow=false; g.add(sp); g.add(sp.target); lamps.push(sp);
+    const cone=new THREE.Mesh(new THREE.ConeGeometry(1.15,3.9,32,1,true), new THREE.MeshBasicMaterial({color:0xffe0b8,transparent:true,opacity:0.0,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,visible:false}));
+    cone.position.set(x,2.2,-3.0); g.add(cone);
   }
   return {g, lamps};
 }
@@ -391,6 +432,30 @@ function backdrop(){
 }
 scene.add(backdrop());
 
+// curbs + planters + trees to break the asphalt expanse
+function curbsTrees(){
+  const g=new THREE.Group();
+  const conc=new THREE.MeshStandardMaterial({color:0x4b4e54, roughness:0.92, metalness:0.05});
+  const soil=new THREE.MeshStandardMaterial({color:0x241c14, roughness:1.0});
+  const foliage=new THREE.MeshStandardMaterial({color:0x1d3a1e, roughness:0.9});
+  const trunk=new THREE.MeshStandardMaterial({color:0x2e2118, roughness:0.9});
+  // long curb along road edge
+  const curb=new THREE.Mesh(new THREE.BoxGeometry(46,0.18,0.5), conc); curb.position.set(0,0.09,8.2); curb.receiveShadow=true; g.add(curb);
+  // planter islands between bays — real props placed in loadProps; low soil mound here
+  for(const x of [-4.4,0,4.4]){
+    const pl=new THREE.Mesh(new THREE.BoxGeometry(1.15,0.24,5.4), conc); pl.position.set(x,0.12,-2.4); pl.receiveShadow=true; g.add(pl);
+    const sl=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.05,5.2), soil); sl.position.set(x,0.25,-2.4); g.add(sl);
+  }
+  // tree line distant
+  for(let i=0;i<18;i++){
+    const x=-34+i*4+Math.random()*2;
+    const tr=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.18,2.2,8), trunk); tr.position.set(x,1.1,10.5+Math.random()*2); g.add(tr);
+    const lv=new THREE.Mesh(new THREE.ConeGeometry(1.1,3.2,8), foliage); lv.position.set(x,3.4,10.5); g.add(lv);
+  }
+  return g;
+}
+scene.add(curbsTrees());
+
 // low guard rail along road edge + road
 const guard = new THREE.Group();
 {
@@ -411,7 +476,7 @@ scene.add(guard);
 
 // ---------------- assets: chargers & cars ----------------
 const loader = new GLTFLoader();
-function loadGLB(path){ return new Promise((res,rej)=>loader.load(path,res,(e)=>{},(e)=>rej(new Error('loadfail '+path+' '+(e&&(e.message||e.type||'')))))); }
+function loadGLB(path){ return new Promise((res,rej)=>{ const to=setTimeout(()=>rej(new Error('timeout '+path)), 120000); loader.load(path,(g)=>{clearTimeout(to);res(g);},(e)=>{},(e)=>{clearTimeout(to);rej(new Error('loadfail '+path+' '+(e&&(e.message||e.type||''))));}); }); }
 
 let chargerProto=null, carProtos=[];
 const bays = BAYS.map(x=>({ x, charger:null, car:null, state:'empty', plug:null, plugHome:null, chargeKwh:0, sessionRev:0, price:0.124 }));
@@ -454,16 +519,43 @@ function boostEnv(root, inten=2.6){
     }
   });
 }
+// real foliage & street props (Poly Haven)
+const PROPS = {};
+async function loadProps(){
+  const defs = [
+    ['shrub','assets/shrub_b.glb'],
+    ['shrub2','assets/shrub_a.glb'],
+    ['planter','assets/planter.glb'],
+    ['tree','assets/tree.glb'],
+    ['lamp','assets/lamp.glb'],
+  ];
+  for(const [k,u] of defs){
+    try{ console.log('PROP', k); const g=await loadGLB(u); PROPS[k]=g.scene; boostEnv(PROPS[k],1.4); console.log('PROP OK', k); }catch(e){ console.warn('prop fail',k,e&&e.message); }
+  }
+  // place them
+  function fitH(obj,h){ const b=new THREE.Box3().setFromObject(obj); const s=new THREE.Vector3(); b.getSize(s); const k=h/Math.max(s.y,0.01); obj.scale.setScalar(k); return obj; }
+  function place(obj,x,z,ry,h){ const o=obj.clone(true); if(h) fitH(o,h); o.rotation.y=ry||0; const b=new THREE.Box3().setFromObject(o); o.position.set(x, -b.min.y, z); o.traverse(m=>{if(m.isMesh){m.castShadow=true;}}); scene.add(o); return o; }
+  if(PROPS.planter){ for(const x of [-4.4,0,4.4]) place(PROPS.planter, x, -3.0, Math.PI/2, 0.45); }
+  if(PROPS.shrub){ for(const x of [-4.4,0,4.4]) for(const dz of [-1.4,-0.2,1.0]) place(PROPS.shrub, x+(Math.random()-0.5)*0.25, -3.0+dz, Math.random()*6, 0.5); }
+  if(PROPS.shrub2){ for(const x of [-4.4,0,4.4]) place(PROPS.shrub2, x, -1.6, Math.random()*6, 0.42); }
+  // backdrop green band
+  if(PROPS.shrub2){ for(let i=0;i<10;i++) place(PROPS.shrub2, -18+i*4+Math.random()*2, 12.5, Math.random()*6, 0.7); }
+  if(PROPS.tree){ for(const [x,z,h] of [[-11.5,4.5,3.6],[11.5,4.5,3.2],[-14,0.5,3.0],[14,-2,2.7]]) place(PROPS.tree, x, z, Math.random()*6, h); }
+  if(PROPS.lamp){ for(const x of [-7.5,7.5]) place(PROPS.lamp, x, -9.5, Math.PI, 5.6); for(const x of [-12,12]) place(PROPS.lamp, x, 5.5, 0, 5.6); }
+}
+
 async function loadAssets(){
+  console.log('STAGE chargers');
   const c = await loadGLB('assets/charger.glb'); chargerProto=c.scene; boostEnv(c.scene, 1.8);
   // hero cars: Khronos CarConcept + three.js Ferrari
+  console.log('STAGE hero');
   const hero1 = await loadGLB('assets/car_concept.glb');
   const h1 = orientCar(hero1.scene); boostEnv(h1, 3.2);
   carProtos.push(h1);
   // paint variants of h1
   for(const col of [PAINTS[0], PAINTS[1], PAINTS[2], PAINTS[3]]){
     const v = h1.clone(true);
-    v.traverse(o=>{ if(o.isMesh&&o.material&&o.material.metalness===1&&o.material.roughness<=0.35){ o.material=o.material.clone(); o.material.color.setHex(col); } });
+    v.traverse(o=>{ if(o.isMesh&&o.material&&o.material.name&&o.material.name.startsWith('Paint')){ o.material=o.material.clone(); o.material.color.setHex(col); } });
     carProtos.push(v);
   }
   // place chargers
@@ -476,7 +568,11 @@ async function loadAssets(){
     // plug parked at holster
     const pg = carProtos.length? null:null;
   });
+  console.log('STAGE plugs');
   await loadPlugs();
+  console.log('STAGE props');
+  await loadProps();
+  console.log('STAGE propsdone');
   spawnCar(bays[0], true); spawnCar(bays[2], true); spawnCar(bays[1], true);
   ready=true;
   document.getElementById('start').style.display='none';
@@ -504,9 +600,9 @@ function spawnCar(bay, instant=false){
   car.rotation.y = Math.PI; // front faces chargers (-Z if model front is +Z we flip after vision check)
   // ground light refs: behind (tail, red) and front (head, warm) — car forward is -Z after rot.y=PI/2
   const cshadow = contactShadow(5.6, 2.8, 0, 0, 0.9); cshadow.position.set(car.position.x, 0.018, car.position.z); scene.add(cshadow); bay.cshadow=cshadow;
-  const tail=new THREE.Mesh(new THREE.PlaneGeometry(1.7,2.6), new THREE.MeshBasicMaterial({map:carReflTexRed,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.4}));
+  const tail=new THREE.Mesh(new THREE.PlaneGeometry(1.7,2.6), new THREE.MeshBasicMaterial({map:carReflTexRed,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.18}));
   tail.rotation.x=-Math.PI/2; tail.position.set(car.position.x, 0.016, car.position.z+1.4); tail.rotation.z=Math.PI; tail.renderOrder=5; scene.add(tail); bay.tailRefl=tail;
-  const head=new THREE.Mesh(new THREE.PlaneGeometry(1.5,2.2), new THREE.MeshBasicMaterial({map:carReflTexWarm,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.3}));
+  const head=new THREE.Mesh(new THREE.PlaneGeometry(1.5,2.2), new THREE.MeshBasicMaterial({map:carReflTexWarm,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0.15}));
   head.rotation.x=-Math.PI/2; head.position.set(car.position.x, 0.016, car.position.z-1.2); head.renderOrder=5; scene.add(head); bay.headRefl=head;
   scene.add(car); bay.car=car; bay.state='arriving';
   // drive-in animation target
@@ -627,14 +723,14 @@ function shadowTex(){
 }
 const SHADOW_TEX = shadowTex();
 function contactShadow(w,d,x,z,op){
-  const m=new THREE.Mesh(new THREE.PlaneGeometry(w,d), new THREE.MeshBasicMaterial({map:SHADOW_TEX,transparent:true,opacity:op??0.85,depthWrite:false,blending:THREE.MultiplyBlending}));
+  const m=new THREE.Mesh(new THREE.PlaneGeometry(w,d), new THREE.MeshBasicMaterial({map:SHADOW_TEX,transparent:true,opacity:(op??0.85)*0.45,depthWrite:false,blending:THREE.MultiplyBlending}));
   m.rotation.x=-Math.PI/2; m.position.set(x,0.018,z); m.renderOrder=6; return m;
 }
 
 // ---------------- rain: instanced streaks ----------------
 const rainCount = 4000;
 const dropGeo = new THREE.PlaneGeometry(0.008, 0.34);
-const rainMat = new THREE.MeshBasicMaterial({ color:0x8ea6c0, transparent:true, opacity:0.3, depthWrite:false, side:THREE.DoubleSide });
+const rainMat = new THREE.MeshBasicMaterial({ color:0xa8c2dc, transparent:true, opacity:0.5, depthWrite:false, side:THREE.DoubleSide });
 const rain = new THREE.InstancedMesh(dropGeo, rainMat, rainCount);
 const rdrops = new Float32Array(rainCount*3);
 const dummy = new THREE.Object3D();
@@ -685,7 +781,7 @@ function animate(){
   spotPrice = 0.10+0.06*Math.sin(gameClock/47)+0.02*Math.sin(gameClock/7.3);
   priceEl.textContent = (spotPrice*100).toFixed(1)+'¢/kWh';
   sign.drawSign(spotPrice*100);
-  fog.density = 0.0038 + raining*0.0014;
+  fog.density = 0.009 + raining*0.002;
 
   // rain update — streak drop + reinstance
   const fall=(9+raining*11)*dt, wind=raining*2.2*dt;
@@ -695,10 +791,10 @@ function animate(){
     if(Math.abs(rdrops[i*3]-camera.position.x)>26||Math.abs(rdrops[i*3+2]-camera.position.z)>26){
       rdrops[i*3]=(camera.position.x+(Math.random()-0.5)*46); rdrops[i*3+2]=(camera.position.z+(Math.random()-0.5)*46); rdrops[i*3+1]=18+Math.random()*6;
     }
-    if(i%2===0){ dummy.position.set(rdrops[i*3],rdrops[i*3+1],rdrops[i*3+2]); dummy.rotation.set(0.14,0,0.10); dummy.updateMatrix(); rain.setMatrixAt(i,dummy.matrix); }
+    dummy.position.set(rdrops[i*3],rdrops[i*3+1],rdrops[i*3+2]); dummy.rotation.set(0.14,0,0.10); dummy.updateMatrix(); rain.setMatrixAt(i,dummy.matrix);
   }
   rain.instanceMatrix.needsUpdate=true;
-  rainMat.opacity = 0.10+raining*0.18;
+  rainMat.opacity = 0.28+raining*0.30;
   wxEl.textContent = raining>0.4?'Light rain':'Clear dusk';
 
   // bay logic
@@ -774,10 +870,10 @@ try{
   ssao.output = SSAOPass.OUTPUT.Default;
   composer.addPass(ssao);
 }catch(e){ console.warn('ssao unavailable', e); }
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 0.28, 0.5, 0.9);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 0.16, 0.5, 0.92);
 composer.addPass(bloom);
 const FinalFX = {
-  uniforms:{ tDiffuse:{value:null}, time:{value:0}, aberr:{value:0.0008}, grain:{value:0.018}, vign:{value:0.24} },
+  uniforms:{ tDiffuse:{value:null}, time:{value:0}, aberr:{value:0.0006}, grain:{value:0.006}, vign:{value:0.24} },
   vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
   fragmentShader:`
     uniform sampler2D tDiffuse; uniform float time, aberr, grain, vign;
@@ -812,11 +908,12 @@ window.__GAME = {
   carMats(){ const out=[]; const car=carProtos[0]; if(!car) return out; const seen=new Set(); car.traverse(o=>{ if(o.isMesh&&o.material){ const ms=Array.isArray(o.material)?o.material:[o.material]; for(const m of ms){ if(seen.has(m.uuid))continue; seen.add(m.uuid); out.push({name:m.name,metal:m.metalness,rough:m.roughness,env:m.envMapIntensity,cc:m.clearcoat!==undefined?m.clearcoat:null,color:m.color?m.color.getHexString():null}); } } }); return out; },
   ready:()=>ready, envReady:()=>envReady,
   carBoxes(){ const out=[]; for(const b of bays){ if(b.car){ const bb=new THREE.Box3().setFromObject(b.car); out.push({bay:b.x, state:b.state, min:bb.min.toArray().map(v=>+v.toFixed(2)), max:bb.max.toArray().map(v=>+v.toFixed(2))}); } } return out; },
-  pose(x,y,z,ry){ camera.position.set(x,y,z); camera.rotation.set(0,ry,0); },
+  pose(x,y,z,ry,rx){ camera.position.set(x,y,z); camera.rotation.set(rx||0,ry,0); },
+  groundInfo(){ const mats=[]; scene.traverse(o=>{ if(o.isMesh && o.geometry && o.geometry.type==='PlaneGeometry' && o.geometry.parameters && o.geometry.parameters.width===220){ const m=o.material; mats.push({name:m.name||'std', hasMap:!!m.map, mapSrc:m.image?m.image.src||m.image.currentSrc||('w'+m.image.width):null, repeat:m.map?[m.map.repeat.x,m.map.repeat.y]:null, rough:m.roughness, metal:m.metalness, vis:o.visible}); } }); return mats; },
   weather(v){ raining=v; },
   serve(){ served+=1; },
   setClock(h){ gameClock=h*60; },
 };
 
-loadAssets().catch(e=>{ console.error('asset load failed', e && e.type, e && e.target && e.target.responseURL, e && e.message); document.getElementById('start').innerHTML='<h1>ASSET ERROR</h1><p>'+e+'</p>'; });
+loadAssets().catch(e=>{ console.error('asset load failed', e && e.type, e && e.message); ready=true; if(!envReady) envReady=true; });
 animate();
