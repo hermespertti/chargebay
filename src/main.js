@@ -771,7 +771,7 @@ async function loadPlugs(){
   bays.forEach(b=>{
     const pl = plugsProto.clone(true);
     pl.position.set(b.x+0.34, 1.05, -6.0); pl.rotation.set(0,Math.PI,0); pl.scale.setScalar(1.15);
-    pl.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
+    pl.traverse(o=>{ if(o.isMesh){ o.castShadow=true; if(o.material && o.material.name==='CableJacket') o.visible=false; } });
     scene.add(pl); b.plug=pl; b.plugHome={pos:pl.position.clone(), rot:pl.rotation.clone()};
     // port target ring: appears at the car port when this bay's connector is in hand
     const ring=new THREE.Mesh(new THREE.RingGeometry(0.14,0.24,28), new THREE.MeshBasicMaterial({color:0x39e6a8,transparent:true,opacity:0,depthWrite:false,depthTest:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide}));
@@ -824,6 +824,7 @@ addEventListener('keyup',e=>keys[e.code]=false);
 let ready=false;
 let grabbedBay=null, docked=false;
 function lerpAng(a,b,k){ let d=(b-a)%(Math.PI*2); if(d>Math.PI)d-=Math.PI*2; if(d<-Math.PI)d+=Math.PI*2; return a+d*k; }
+function lerpDelta(a,b){ let d=(b-a)%(Math.PI*2); if(d>Math.PI)d-=Math.PI*2; if(d<-Math.PI)d+=Math.PI*2; return d; }
 // ---- cable physics (Verlet chain per bay, connector -> port/hand) ----
 const CABLE_SEGS=26, CABLE_LEN=4.1, CABLE_RANGE=3.4;
 function makeCable(){
@@ -1167,10 +1168,11 @@ function tryInteract(){
       const port=bayPort(b);
       if(port.distanceTo(camera.position)<2.2){
         docked=true; b.plugged=true; b.car.userData.docked=true; b.state='ready';
-        // snap plug onto the port; hands free -> can service other bays while charging
-        b.plug.position.copy(port); b.plug.position.y+=0.05;
+        // snap plug onto the port nozzle-in; hands free -> can service other bays while charging
+        b.plug.position.copy(port); b.plug.position.y+=0.05; b.plug.rotation.set(0,0,Math.PI/2);
+        autoEnergize(b);
         grabbedBay=null; docked=false;
-        SFX.latch(); toast('✅ Locked — press R to energize'); return;
+        SFX.latch(); toast('✅ Locked — charging'); return;
       } else { toast('❌ Move closer to the port'); return; }
     }
   }
@@ -1192,16 +1194,17 @@ function tryInteract(){
   if(t.type==='charger' && b.plugged && !grabbedBay){ toast('⚡ Bay already charging'); }
 }
 
+function autoEnergize(b){
+  // plug-and-pay: docking the connector starts the session immediately
+  if(b.plugged && b.state==='ready'){ b.state='charging'; b.price=spotPrice; b.sell=sellPrice(); b.kwhStart=0; b.chargeKwh=0; b.sessionCost=0; SFX.click(420); toast('⚡ Charging at '+b.kw+' kW'); }
+}
 function toggleCharge(forceBay){
-  // R works on the bay you're looking at once its connector is docked; the plug
-  // stays on the car and charging continues hands-free -> multiple cars at once.
+  // R is now just pause/resume — plugging in already starts charging.
   let b= forceBay!=null ? bays[forceBay] : (grabbedBay && docked ? grabbedBay : (currentTarget()? currentTarget().bay : null));
   if(!b){ toast('Aim at a charger'); return; }
   if(!b.plugged){ toast('Dock the connector first (E)'); return; }
   if(b.state==='charging'){ b.state='ready'; SFX.click(180); toast('⏸ Charging paused'); return; }
-  b.state='charging'; b.price=spotPrice; b.sell=sellPrice(); b.kwhStart=0; b.chargeKwh=0; b.sessionCost=0;
-  if(grabbedBay===b){ grabbedBay=null; docked=false; } // hand released, plug stays on car
-  SFX.click(420); toast('⚡ Charging at '+b.kw+' kW');
+  autoEnergize(b);
 }
 
 // ---------------- contact shadows ----------------
@@ -1332,6 +1335,14 @@ function animate(){
   const fall=(9+raining*11)*dt, wind=raining*2.2*dt;
   for(let i=0;i<rainCount;i++){
     rdrops[i*3+1]-=fall; rdrops[i*3]+=wind;
+    // canopy shelter: drops over the roofed footprint get bounced off the roof to a random spot beyond its edge
+    const rx=rdrops[i*3], rz=rdrops[i*3+2];
+    if(rx>-10.4&&rx<10.4&&rz>-7.8&&rz<1.8){
+      const side=Math.random()<0.5?-1:1;
+      rdrops[i*3]= side<0? -10.6-Math.random()*14 : 10.6+Math.random()*14;
+      rdrops[i*3+2]= (Math.random()-0.5)*44;
+      rdrops[i*3+1]= 14+Math.random()*10;
+    }
     if(rdrops[i*3+1]<0){ rdrops[i*3+1]=20+Math.random()*4; rdrops[i*3]=(camera.position.x+(Math.random()-0.5)*46); rdrops[i*3+2]=(camera.position.z+(Math.random()-0.5)*46); }
     if(Math.abs(rdrops[i*3]-camera.position.x)>26||Math.abs(rdrops[i*3+2]-camera.position.z)>26){
       rdrops[i*3]=(camera.position.x+(Math.random()-0.5)*46); rdrops[i*3+2]=(camera.position.z+(Math.random()-0.5)*46); rdrops[i*3+1]=18+Math.random()*6;
@@ -1341,10 +1352,12 @@ function animate(){
   rain.instanceMatrix.needsUpdate=true;
   rainMat.opacity = 0.28+raining*0.30;
   // camera lens droplets overlay
-  if(lensFx){ lensFx.style.opacity = Math.min(1, raining*1.15); raining>0.05 && lensDrip(dt); }
+  const sheltered = camera.position.x>-10.2 && camera.position.x<10.2 && camera.position.z>-7.6 && camera.position.z<1.6;
+  if(lensFx){ const eff= raining*(sheltered?0.12:1.15); lensFx.style.opacity = Math.min(1, eff); raining>0.05 && !sheltered && lensDrip(dt); }
   let wx = nightK>0.82? 'Clear night' : (nightK>0.25? 'Dusk' : 'Clear');
-  if(raining>0.4) wx = (nightK>0.82? 'Rainy night' : nightK>0.25? 'Rainy dusk' : 'Light rain');
-  if(now<coldUntil) wx = (raining>0.4?'Freezing rain':'Cold snap');
+  if(raining>0.4) wx = nightK>0.82? 'Rainy night' : nightK>0.25? 'Rainy dusk' : 'Light rain';
+  if(now<coldUntil) wx = raining>0.4? 'Freezing rain' : 'Cold snap';
+  if(raining>0.4 && sheltered) wx += ' · dry under canopy';
   if(now<brownUntil) wx += ' + Brownout';
   wxEl.textContent = wx;
   SFX.setRain(raining);
@@ -1362,6 +1375,8 @@ function animate(){
       if(b.cshadow) b.cshadow.position.z = b.car.position.z;
       if(Math.abs(b.car.position.z-b.driveTo)<0.05){ b.state='parked'; b.car.userData.arrived=performance.now(); SFX.engine(); SFX.chime(660,880); toast('🚗 New arrival — bay '+(BAYS.indexOf(b.x)+1)); }
     }
+    // auto-resume throttled bays once the brownout clears
+    if(b.throttled && b.plugged && (!(now<brownUntil) || totalKw + b.kw <= brownCap)){ b.throttled=false; autoEnergize(b); }
     if(b.barG && b.car){
       const show = b.state==='charging';
       b.barG.visible=show;
@@ -1378,7 +1393,7 @@ function animate(){
     }
     if(b.state==='charging' && b.car){
       // brownout throttle: if adding this bay exceeds cap, pause the newest charger
-      if(totalKw + b.kw > brownCap && now<brownUntil){ b.state='ready'; SFX.click(160); toast('⚠️ Bay throttled — brownout cap '+brownCap+' kW'); continue; }
+      if(totalKw + b.kw > brownCap && now<brownUntil){ b.state='ready'; b.throttled=true; SFX.click(160); toast('⚠️ Bay throttled — brownout cap '+brownCap+' kW'); continue; }
       const add = dt*(b.kw/350)*0.02*(now<coldUntil?0.65:1); // cold slows chemistry
       const kwh = add*PACK_KWH;
       b.car.userData.battery=Math.min(1,b.car.userData.battery+add);
@@ -1397,24 +1412,29 @@ function animate(){
       if(b.plug){ b.plug.traverse(o=>{ if(o.isMesh&&o.material&&o.material.emissive) o.material.emissiveIntensity = 6+Math.sin(now/120)*4; }); }
     }
     if(b.state==='departing' && b.car){
-      const dep=b.car.userData.dep || (b.car.userData.dep={stage:0, dir:(b.x<=0?1:-1), v:0});
+      const dep=b.car.userData.dep || (b.car.userData.dep={stage:0, dir:(b.x<=0?1:-1), v:0, t:0, yaw0:b.car.rotation.y});
+      const targetYaw = dep.dir>0 ? Math.PI/2 : -Math.PI/2; // heading +X or -X along road
       if(dep.stage===0){
-        // reverse straight out of the bay (car front is -Z, reverse = +Z)
-        dep.v=Math.min(1.6, dep.v+dt*1.2);
-        b.car.position.z += dep.v*dt;
-        if(b.cshadow){ b.cshadow.position.set(b.car.position.x,0.018,b.car.position.z); }
-        if(b.car.position.z>9.8){ dep.stage=1; dep.v=0; }
+        // back out of the bay while turning (arc): reverse thrust + progressive steering
+        dep.t+=dt;
+        dep.v=Math.min(3.0, dep.v+dt*2.0);
+        const k=THREE.MathUtils.smoothstep(dep.t,0.6,3.4);      // back straight first, then swing the rear around
+        b.car.rotation.y = lerpAng(dep.yaw0, targetYaw, k);
+        const rev=new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), b.car.rotation.y); // rear = local -Z? (front faces -Z at spawn => rear dir is +Z world via this)
+        b.car.position.addScaledVector(rev, dep.v*dt);
+        if(b.cshadow){ b.cshadow.position.set(b.car.position.x,0.018,b.car.position.z); b.cshadow.rotation.y=b.car.rotation.y; }
+        if((b.car.position.z>7.2 && Math.abs(lerpDelta(b.car.rotation.y,targetYaw))<0.15) || dep.t>5.5){ dep.stage=1; dep.v=0; }
       } else if(dep.stage===1){
-        // pivot on the road: point front along the road direction
-        b.car.position.z += 0.4*dt;
-        const targetYaw = dep.dir>0 ? Math.PI/2 : -Math.PI/2; // heading +X or -X
-        b.car.rotation.y = lerpAng(b.car.rotation.y, targetYaw, Math.min(1,dt*2.2));
-        if(b.cshadow){ b.cshadow.rotation.y = b.car.rotation.y; }
-        b.car.position.x += (targetYaw>0?1:-1)*dep.v*dt*0.5; dep.v=Math.min(1,dep.v+dt);
-        if(Math.abs(b.car.rotation.y-targetYaw)<0.06){ dep.stage=2; }
+        // shunt forward to straighten on the road
+        dep.t+=dt;
+        b.car.rotation.y = lerpAng(b.car.rotation.y, targetYaw, Math.min(1,dt*4));
+        const rev2=new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), b.car.rotation.y);
+        b.car.position.addScaledVector(rev2, 0.8*dt);
+        if(b.cshadow){ b.cshadow.position.set(b.car.position.x,0.018,b.car.position.z); b.cshadow.rotation.y=b.car.rotation.y; }
+        if(Math.abs(lerpDelta(b.car.rotation.y,targetYaw))<0.05){ dep.stage=2; }
       } else {
-        // drive off along the road
-        dep.v=Math.min(7.5, dep.v+dt*3.2);
+        // cruise off along the road
+        dep.v=Math.min(9, dep.v+dt*5);
         b.car.position.x += dep.dir*dep.v*dt;
         if(b.cshadow){ b.cshadow.position.set(b.car.position.x,0.018,b.car.position.z); }
       }
@@ -1578,7 +1598,7 @@ window.__GAME = {
   // ---- soak-test hooks: drive the REAL interaction path ----
   bayState(i){ const b=bays[i]; return {state:b.state, batt:b.car?+b.car.userData.battery.toFixed(3):null, kwh:+(b.chargeKwh||0).toFixed(3), pat:b.car?+((performance.now()-b.car.userData.arrived)/1000).toFixed(1):null}; },
   grab(i){ if(bays[i].plugged) return 'plugged'; if(grabbedBay&&grabbedBay!==bays[i]) return 'busy'; grabbedBay=bays[i]; docked=false; return 'grabbed'; },
-  dock(i){ if(!bays[i].car) return 'nocar'; docked=false; grabbedBay=null; bays[i].plugged=true; bays[i].car.userData.docked=true; bays[i].state='ready'; return 'docked'; },
+  dock(i){ if(!bays[i].car) return 'nocar'; docked=false; grabbedBay=null; bays[i].plugged=true; bays[i].car.userData.docked=true; bays[i].state='ready'; autoEnergize(bays[i]); return bays[i].state; },
   energize(i){ toggleCharge(i); return i!=null? bays[i].state : (grabbedBay? grabbedBay.state : 'none'); },
   econ(){ return {revenue:+revenue.toFixed(2), served, price:+spotPrice.toFixed(4)}; },
   loadKw(){ let t=0; for(const b of bays) if(b.state==='charging') t+=b.kw; return t; },
