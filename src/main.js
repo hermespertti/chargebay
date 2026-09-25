@@ -926,7 +926,7 @@ function enterTouch(){
   startEl.style.display='none';
   touchEl.style.display='block';
 }
-document.getElementById('playbtn').addEventListener('click',()=>{ SFX.resume(); if(isTouch) enterTouch(); else controls.lock(); });
+document.getElementById('playbtn').addEventListener('click',()=>{ SFX.resume(); if(isTouch) enterTouch(); else controls.lock(); COACH.maybeShow(); });
 startEl.addEventListener('click',(e)=>{ if(!isTouch && e.target.id!=='playbtn') controls.lock(); });
 controls.addEventListener('lock', ()=>{ startEl.style.display='none'; });
 controls.addEventListener('unlock', ()=>{ if(ready && !isTouch && !touchMode) startEl.style.display='flex'; });
@@ -1195,6 +1195,7 @@ function animate(){
   // clock + price drift
   gameClock += dt*1.4; // game time accelerated
   applyDaylight(gameClock);
+  COACH.tick();
   fog.density = THREE.MathUtils.lerp(0.010, 0.0055, THREE.MathUtils.smoothstep(Math.sin(((gameClock/1440)*Math.PI*2)-Math.PI/2)*0.62, 0.04, 0.45)) + raining*0.0012;
   const hh=Math.floor(gameClock/60)%24, mm=Math.floor(gameClock%60);
   clockEl.textContent = String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
@@ -1454,6 +1455,38 @@ window.__GAME = {
   audio(){ return { active: !!(window.__SFXREF && window.__SFXREF.ctx), muted: SFX.muted }; },
 };
 
+// ---------------- first-run coach ----------------
+const COACH = (function(){
+  const KEY='chargebay_coached_v1';
+  let el, steps=[], active=false, startPos=null, seenGrab=false, seenDock=false;
+  function init(){
+    el=document.getElementById('coach');
+    steps=[...document.querySelectorAll('.step')].map(s=>({el:s, done:false}));
+    document.getElementById('coachx').addEventListener('click', hide);
+    if(isTouch) document.body.classList.add('touch');
+  }
+  function maybeShow(){
+    if(localStorage.getItem(KEY)) return;
+    el.style.display='flex'; active=true; startPos=null; document.body.classList.add('coaching');
+    steps.forEach(s=>s.el.classList.remove('done'));
+  }
+  function mark(i){ if(!steps[i].done){ steps[i].done=true; steps[i].el.classList.add('done'); SFX.click(640); } }
+  function tick(){
+    if(!active) return;
+    const p=camera.position;
+    if(!startPos) startPos=p.clone();
+    if(p.distanceTo(startPos)>1.2) mark(0);
+    // grab/dock inferred from persistent bay state (plug stays plugged after release)
+    const anyPlugged = bays.some(b=>b.plugged);
+    if(grabbedBay || anyPlugged) mark(1);
+    if(anyPlugged) mark(2);
+    if(bays.some(b=>b.state==='charging')) mark(3);
+    if(served>0){ mark(4); setTimeout(hide, 2500); }
+  }
+  function hide(){ el.style.display='none'; active=false; document.body.classList.remove('coaching'); localStorage.setItem(KEY,'1'); }
+  return { init, maybeShow, tick, hide };
+})();
+COACH.init();
 initLensFx();
 loadAssets().catch(e=>{ console.error('asset load failed', e && e.type, e && e.message); ready=true; if(!envReady) envReady=true; });
 setInterval(()=>{ if(ready) saveGame(); }, 30000);

@@ -44,6 +44,19 @@
   .tbtn{position:absolute;right:22px;width:74px;height:74px;border-radius:50%;background:rgba(13,34,51,.6);border:1px solid #8fe3ff66;color:#dff4ff;font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;-webkit-user-select:none;touch-action:none;}
   #tE{bottom:110px;} #tR{bottom:24px; right:110px;} #tM{bottom:110px; right:110px; width:48px; height:48px; font-size:16px; opacity:.85;}
   #lensfx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:0;mix-blend-mode:screen;transition:opacity 1.2s;}
+  #coach{position:absolute;inset:0;display:none;align-items:flex-start;justify-content:flex-start;pointer-events:none;z-index:12;}
+  #coachbox{pointer-events:auto;background:rgba(8,14,22,.7);border:1px solid rgba(120,220,255,.32);border-radius:12px;padding:14px 18px;backdrop-filter:blur(6px);width:min(360px,64vw);position:absolute;left:50%;transform:translateX(-50%);bottom:5%;}
+  #coachbox h2{margin:0 0 8px;font-size:13px;letter-spacing:.14em;color:#8fe3ff;font-weight:600;}
+  .step{font-size:12.5px;color:#7f98ac;margin:5px 0;transition:color .3s;text-decoration:line-through;text-decoration-color:rgba(105,240,160,.45);}
+  .step.done{color:#69f0a0;text-decoration:none;}
+  .step.done::before{content:'✓ ';color:#69f0a0;}
+  .step:not(.done)::before{content:'○ ';color:#5a7488;}
+  .step b.kb{color:#fff;}
+  .tch{display:none;}
+  body.touch .tch{display:inline;color:#ffd166;}
+  body.touch .kb{display:none;}
+  #coachs{margin-top:14px;text-align:right;}
+  #coachx{background:none;border:1px solid rgba(140,220,255,.3);color:#8fb8cc;font-size:12px;padding:6px 16px;border-radius:6px;cursor:pointer;letter-spacing:.08em;}
   @media (pointer:coarse){
     #crosshair{opacity:.5;}
     #panel{left:10px;top:10px;padding:8px 10px;min-width:0;width:min(56vw,320px);}
@@ -52,6 +65,10 @@
     #hud{font-size:11px;}
     #prompt{top:66%;font-size:14px;}
     #toast{left:50%;top:auto;bottom:150px;transform:translateX(-50%);font-size:16px;max-width:54vw;}
+    body.coaching #toast{bottom:auto;top:15%;}
+    #coachbox{left:auto;right:8px;transform:none;top:8px;bottom:auto;width:min(52vw,420px);padding:10px 14px;}
+    #coachbox h2{font-size:11px;}
+    .step{font-size:11px;margin:4px 0;}
   }
 </style>
 </head>
@@ -73,6 +90,17 @@
   <div id="prompt">Press <b>E</b></div>
   <div id="crosshair"></div>
   <div id="toast"></div>
+  <div id="coach">
+    <div id="coachbox">
+      <h2 id="coachtitle">SHIFT 1 · WALK THE LOT</h2>
+      <div class="step" id="st0">Move — <b class="kb">WASD</b><span class="tch">joystick</span></div>
+      <div class="step" id="st1">Grab a connector — <b class="kb">E</b><span class="tch">🔌 button</span></div>
+      <div class="step" id="st2">Plug it into the car port — <b class="kb">E</b><span class="tch">🔌 again</span></div>
+      <div class="step" id="st3">Energize — <b class="kb">R</b><span class="tch">⚡ button</span></div>
+      <div class="step" id="st4">Cash a full charge → <b>done</b>. You run this place now.</div>
+      <div id="coachs"><button id="coachx">skip</button></div>
+    </div>
+  </div>
   <div id="touchui">
     <div id="joy"><div id="knob"></div></div>
     <div class="tbtn" id="tE">E</div>
