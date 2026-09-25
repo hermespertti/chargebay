@@ -50,7 +50,7 @@ new RGBELoader().load(HDRI, (hdr)=>{
   scene.traverse(o=>{
     if(o.isMesh && o.material){
       const ms = Array.isArray(o.material)?o.material:[o.material];
-      for(const m of ms){ if(m.isMeshStandardMaterial){ m.envMapIntensity = Math.max(m.envMapIntensity||1, 2.4); if('clearcoat' in m){ m.clearcoat=1.0; m.clearcoatRoughness=0.06; } m.needsUpdate=true; } }
+      for(const m of ms){ if(m.isMeshStandardMaterial){ m.envMapIntensity = Math.min(m.envMapIntensity||1, 1.5); if('clearcoat' in m){ m.clearcoat=0.85; m.clearcoatRoughness=0.12; } m.needsUpdate=true; } }
     }
   });
   envReady = true;
@@ -64,6 +64,10 @@ function refreshSkyEnv(){
   scene.environment = pmrem.fromScene(envScene, 0.04).texture;
   pmrem.dispose();
 }
+
+// ---------------- quality settings (early for applyDaylight) ----------------
+const QKEY='chargebay_quality_v1';
+const Q = { mode: 'auto', glare: 1.0, envMax: 2.2 };  // auto|high|med|low  (loaded properly later)
 
 // ---------------- fog & sky ----------------
 let hdriBG = false;
@@ -154,8 +158,8 @@ function applyDaylight(min){
   hemi.color.copy(cMid);
   renderer.toneMappingExposure = 0.82 + dayAmt*0.6 + nightAmt*0.12;
   // HDRI blend: day brightens env, night deepens it
-  scene.backgroundIntensity = 0.28 + (1-nightAmt)*0.95;
-  if('environmentIntensity' in scene) scene.environmentIntensity = 0.18 + (1-nightAmt)*1.4;
+  scene.backgroundIntensity = (0.28 + (1-nightAmt)*0.95) * Q.glare;
+  if('environmentIntensity' in scene) scene.environmentIntensity = (0.18 + (1-nightAmt)*1.4) * Q.glare;
   // day: bright procedural dome covers the dusk HDRI; dusk/night: HDRI sky shows
   sky.visible = !hdriBG || dayAmt > 0.45;
   horizonGlow.material.opacity = Math.max(0.06, (1-nightAmt)*(1-dayAmt)*0.85 + nightAmt*0.10);
@@ -415,8 +419,8 @@ function buildCanopy(){
   const dark  = new THREE.MeshStandardMaterial({color:0x22262e, metalness:0.55, roughness:0.45, envMapIntensity:1.8});
   const solar = new THREE.MeshStandardMaterial({color:0x0a1226, metalness:0.85, roughness:0.15, envMapIntensity:2.2});
   const led = new THREE.MeshStandardMaterial({color:0x14100c, emissive:0xd8a878, emissiveIntensity:0.8});
-  const fill = new THREE.PointLight(0xffb888, 34, 30, 1.7); fill.position.set(0,3.6,-1.0); g.add(fill);
-  const fill2 = new THREE.PointLight(0xffa068, 22, 24, 1.5); fill2.position.set(0,1.6,3.5); g.add(fill2);
+  const fill = new THREE.PointLight(0xffb888, 24, 30, 1.8); fill.position.set(0,3.6,-1.0); g.add(fill);
+  const fill2 = new THREE.PointLight(0xffa068, 14, 24, 1.6); fill2.position.set(0,1.6,3.5); g.add(fill2);
   const ledW = new THREE.MeshStandardMaterial({color:0x140e08, emissive:0xd89050, emissiveIntensity:0.9});
   // roof slab (light-painted ceiling below so it doesn't read as a black void)
   const ceil = new THREE.MeshStandardMaterial({color:0x9a9186, metalness:0.25, roughness:0.7, envMapIntensity:1.2});
@@ -460,7 +464,7 @@ function buildCanopy(){
     const lens = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.22), new THREE.MeshStandardMaterial({color:0x101418, emissive:0xffc890, emissiveIntensity:1.5})); lens.rotation.x=Math.PI/2; lens.position.set(x,4.4,-3.0); g.add(lens);
     const emit = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.22), new THREE.MeshBasicMaterial({color:0xc9b69c}));
     emit.rotation.x=Math.PI/2; emit.position.set(x,4.40,-3.0); g.add(emit);
-    const sp = new THREE.SpotLight(0xffe3bd, 45, 12, Math.PI/3.4, 0.7, 1.6);
+    const sp = new THREE.SpotLight(0xffe3bd, 30, 12, Math.PI/3.4, 0.75, 1.7);
     sp.position.set(x,4.4,-3.0); sp.target.position.set(x,0,-3.0);
     sp.castShadow=false; g.add(sp); g.add(sp.target); lamps.push(sp);
     const cone=new THREE.Mesh(new THREE.ConeGeometry(1.15,3.9,32,1,true), new THREE.MeshBasicMaterial({color:0xffe0b8,transparent:true,opacity:0.0,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,visible:false}));
@@ -559,12 +563,18 @@ scene.add(curbsTrees());
 const guard = new THREE.Group();
 {
   const steel=new THREE.MeshStandardMaterial({color:0x9aa0a6, metalness:1.0, roughness:0.45});
-  for(const z of [9.5]){
-    const rail=new THREE.Mesh(new THREE.BoxGeometry(60,0.14,0.05), steel); rail.position.set(0,0.72,z); rail.castShadow=true; guard.add(rail);
-    for(let i=0;i<20;i++){
-      const post=new THREE.Mesh(new THREE.BoxGeometry(0.09,0.72,0.09), steel); post.position.set(-30+i*3.2,0.36,z); guard.add(post);
+  // rails with a lot entrance gap (cars reverse out through it)
+  for(const [x0,x1] of [[-30,-9],[9,30]]){
+    const rail=new THREE.Mesh(new THREE.BoxGeometry(x1-x0,0.14,0.05), steel); rail.position.set((x0+x1)/2,0.72,9.5); rail.castShadow=true; guard.add(rail);
+    const n=Math.max(1,Math.floor((x1-x0)/3.2));
+    for(let i=0;i<=n;i++){
+      const x=x0+i*((x1-x0)/n);
+      const post=new THREE.Mesh(new THREE.BoxGeometry(0.09,0.72,0.09), steel); post.position.set(x,0.36,9.5); guard.add(post);
     }
   }
+  // bollards flanking the entrance gap
+  const boll=new THREE.MeshStandardMaterial({color:0xc8b432, metalness:0.6, roughness:0.5, emissive:0x201800, emissiveIntensity:0.4});
+  for(const x of [-9.4,9.4]){ const bo=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.09,0.8,10), boll); bo.position.set(x,0.4,9.5); guard.add(bo); }
   // road beyond guard
   const road=new THREE.Mesh(new THREE.PlaneGeometry(80,9), new THREE.MeshStandardMaterial({color:0x101216, roughness:0.6, metalness:0.2, envMapIntensity:1.2}));
   road.rotation.x=-Math.PI/2; road.position.set(0,0.008,14.5); road.receiveShadow=true; guard.add(road);
@@ -613,11 +623,28 @@ function tintPaint(root, color){
     }
   });
 }
+// ---------------- quality settings ----------------
+function qApply(mode){
+  Q.mode = mode; localStorage.setItem(QKEY, mode);
+  if(mode==='high'){ Q.glare=1.0; Q.envMax=2.6; renderer.setPixelRatio(Math.min(devicePixelRatio,1.5)); renderer.shadowMap.enabled=true; if(ssao) ssao.enabled=true; rain.count=Math.min(rainCount, 2600); mirror.visible=true; }
+  else if(mode==='med'){ Q.glare=0.75; Q.envMax=1.6; renderer.setPixelRatio(Math.min(devicePixelRatio,1)); renderer.shadowMap.enabled=true; if(ssao) ssao.enabled=false; rain.count=Math.min(rainCount, 1400); mirror.visible=true; }
+  else if(mode==='low'){ Q.glare=0.6; Q.envMax=1.2; renderer.setPixelRatio(Math.max(0.65, Math.min(devicePixelRatio,0.7))); renderer.shadowMap.enabled=false; if(ssao) ssao.enabled=false; rain.count=Math.min(rainCount, 600); mirror.visible=false; }
+  else { // auto: scale by display width; fps governor in animate
+    renderer.setPixelRatio(Math.min(devicePixelRatio, Math.max(0.65, 1200/window.innerWidth)));
+    if(ssao) ssao.enabled = window.innerWidth<=1600;
+    rain.count=Math.min(rainCount, 1400); mirror.visible=true;
+  }
+  scene.traverse(o=>{ if(o.isMesh&&o.material){ const ms=Array.isArray(o.material)?o.material:[o.material]; for(const m of ms){ if(m.isMeshStandardMaterial){ m.envMapIntensity=Math.min(m.envMapIntensity||1, Q.envMax); m.needsUpdate=true; } } } });
+  applyDaylight(gameClock);
+  toast('\u2699 Quality: '+mode.toUpperCase());
+}
+let autoLowT=0, autoDropped=false;
+
 function boostEnv(root, inten=2.6){
   root.traverse(o=>{
     if(o.isMesh && o.material){
       const ms=Array.isArray(o.material)?o.material:[o.material];
-      for(const m of ms){ if(m.isMeshStandardMaterial){ m.envMapIntensity=Math.max(m.envMapIntensity||1,inten); if('clearcoat' in m){ m.clearcoat=Math.max(m.clearcoat,0.9); m.clearcoatRoughness=Math.min(m.clearcoatRoughness,0.08);} if(m.emissiveIntensity>4){ m.emissiveIntensity=2.2; } m.needsUpdate=true; } }
+      for(const m of ms){ if(m.isMeshStandardMaterial){ m.envMapIntensity=Math.min(m.envMapIntensity||1, Q.envMax); if('clearcoat' in m){ m.clearcoat=Math.min(m.clearcoat+0.2,0.9); m.clearcoatRoughness=Math.max(m.clearcoatRoughness,0.1);} if(m.emissiveIntensity>4){ m.emissiveIntensity=2.2; } m.needsUpdate=true; } }
     }
   });
 }
@@ -689,6 +716,7 @@ async function loadAssets(){
         if(n.includes('taillight')||n.includes('led')||n.includes('turn')){ m.emissive=new THREE.Color(n.includes('turn')?0xff9a20:0xff1a10); m.emissiveIntensity=1.6; }
         if(n.includes('carbon')){ m.roughness=Math.min(m.roughness,0.35); m.metalness=Math.max(m.metalness,0.4); }
       } } });
+    f.children[0].rotation.y += Math.PI; // FBX front axis is +Z: flip to match fleet (-Z)
     carProtos.push(f);
     console.log('STAGE ferrari ok');
   }catch(e){ console.warn('ferrari skipped', e && e.message); }
@@ -745,7 +773,16 @@ async function loadPlugs(){
     pl.position.set(b.x+0.34, 1.05, -6.0); pl.rotation.set(0,Math.PI,0); pl.scale.setScalar(1.15);
     pl.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
     scene.add(pl); b.plug=pl; b.plugHome={pos:pl.position.clone(), rot:pl.rotation.clone()};
+    // port target ring: appears at the car port when this bay's connector is in hand
+    const ring=new THREE.Mesh(new THREE.RingGeometry(0.14,0.24,28), new THREE.MeshBasicMaterial({color:0x39e6a8,transparent:true,opacity:0,depthWrite:false,depthTest:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide}));
+    ring.renderOrder=9; scene.add(ring); b.portRing=ring;
+    b.cable=makeCable();
   });
+}
+function bayPort(b){
+  const port=new THREE.Vector3(-1.5*(b.car.scale.x),0.62,-0.95);
+  port.applyQuaternion(b.car.quaternion); port.add(b.car.position);
+  return port;
 }
 
 // spawn a car at a bay with random paint & battery
@@ -786,6 +823,45 @@ addEventListener('keyup',e=>keys[e.code]=false);
 
 let ready=false;
 let grabbedBay=null, docked=false;
+function lerpAng(a,b,k){ let d=(b-a)%(Math.PI*2); if(d>Math.PI)d-=Math.PI*2; if(d<-Math.PI)d+=Math.PI*2; return a+d*k; }
+// ---- cable physics (Verlet chain per bay, connector -> port/hand) ----
+const CABLE_SEGS=26, CABLE_LEN=4.1, CABLE_RANGE=3.4;
+function makeCable(){
+  const pts=[], old=[];
+  for(let i=0;i<=CABLE_SEGS;i++){ pts.push(new THREE.Vector3(0,1,-6)); old.push(new THREE.Vector3(0,1,-6)); }
+  const geo=new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(p=>p.clone())), CABLE_SEGS*2, 0.055, 8, false);
+  const mat=new THREE.MeshStandardMaterial({color:0x191e26, roughness:0.55, metalness:0.15});
+  const mesh=new THREE.Mesh(geo,mat); mesh.castShadow=true; mesh.frustumCulled=false; scene.add(mesh);
+  return {pts, old, mesh, geo};
+}
+function cableStep(cab, a, b, dt){
+  // verlet: gravity + constraint solve, endpoints pinned to a(bay end) and b(plug end)
+  const g=-9.8*dt*dt;
+  for(let i=1;i<CABLE_SEGS;i++){
+    const p=cab.pts[i], o=cab.old[i];
+    const vx=(p.x-o.x)*0.985, vy=(p.y-o.y)*0.985, vz=(p.z-o.z)*0.985;
+    o.copy(p); p.x+=vx; p.y+=vy+g; p.z+=vz;
+    // collide with car body as rough box while docked
+    if(p.y<0.06) p.y=0.06;
+  }
+  const rest=CABLE_LEN/CABLE_SEGS;
+  for(let k=0;k<8;k++){
+    cab.pts[0].copy(a); cab.pts[CABLE_SEGS].copy(b);
+    for(let i=0;i<CABLE_SEGS;i++){
+      const p0=cab.pts[i], p1=cab.pts[i+1];
+      let dx=p1.x-p0.x, dy=p1.y-p0.y, dz=p1.z-p0.z;
+      const d=Math.sqrt(dx*dx+dy*dy+dz*dz)||1e-6;
+      const diff=(d-rest)/d*0.5;
+      if(i!==0){ p0.x+=dx*diff; p0.y+=dy*diff; p0.z+=dz*diff; }
+      if(i+1!==CABLE_SEGS){ p1.x-=dx*diff; p1.y-=dy*diff; p1.z-=dz*diff; }
+    }
+  }
+  cab.pts[0].copy(a); cab.pts[CABLE_SEGS].copy(b);
+  // rebuild tube geometry
+  const curve=new THREE.CatmullRomCurve3(cab.pts);
+  const ng=new THREE.TubeGeometry(curve, CABLE_SEGS*2, 0.055, 8, false);
+  cab.mesh.geometry.dispose(); cab.mesh.geometry=ng;
+}
 const PACK_KWH = 75; // kWh per full charge
 const TIERS = [ {kw:150,cost:0}, {kw:350,cost:800}, {kw:600,cost:2000} ];
 const BUFFER_COST=600, BUFFER_CAP=200, BUFFER_RATE_KWH_MIN=0.5; // buffer charge rate at cheap prices
@@ -1088,8 +1164,7 @@ function tryInteract(){
   // holding this bay's connector in hand -> try to dock
   if(grabbedBay===b && !docked){
     if(b.car){
-      const port=new THREE.Vector3(-1.5*(b.car.scale.x),0.62,-0.95);
-      port.applyQuaternion(b.car.quaternion); port.add(b.car.position);
+      const port=bayPort(b);
       if(port.distanceTo(camera.position)<2.2){
         docked=true; b.plugged=true; b.car.userData.docked=true; b.state='ready';
         // snap plug onto the port; hands free -> can service other bays while charging
@@ -1140,8 +1215,8 @@ function shadowTex(){
 }
 const SHADOW_TEX = shadowTex();
 function contactShadow(w,d,x,z,op){
-  const m=new THREE.Mesh(new THREE.PlaneGeometry(w,d), new THREE.MeshBasicMaterial({map:SHADOW_TEX,transparent:true,opacity:(op??0.85)*0.45,depthWrite:false,blending:THREE.MultiplyBlending}));
-  m.rotation.x=-Math.PI/2; m.position.set(x,0.018,z); m.renderOrder=6; return m;
+  const m=new THREE.Mesh(new THREE.PlaneGeometry(w,d), new THREE.MeshBasicMaterial({map:SHADOW_TEX,transparent:true,opacity:(op??0.85)*0.26,depthWrite:false,blending:THREE.MultiplyBlending}));
+  m.rotation.order='YXZ'; m.rotation.x=-Math.PI/2; m.position.set(x,0.018,z); m.renderOrder=6; return m;
 }
 
 // ---------------- rain: instanced streaks ----------------
@@ -1188,7 +1263,8 @@ let last=performance.now(), fpsAcc=0, fpsN=0, fpsVal=60;
 function animate(){
   requestAnimationFrame(animate);
   const now=performance.now(); const dt=Math.min(0.05,(now-last)/1000); last=now;
-  fpsAcc+=1/dt; fpsN++; if(fpsN>=30){ fpsVal=fpsAcc/fpsN; fpsAcc=0; fpsN=0; diag.fps=Math.round(fpsVal); }
+  fpsAcc+=1/dt; fpsN++; if(fpsN>=30){ fpsVal=fpsAcc/fpsN; fpsAcc=0; fpsN=0; diag.fps=Math.round(fpsVal);
+    if(Q.mode==='auto' && !autoDropped && diag.fps<28){ autoLowT++; if(autoLowT>=3){ autoDropped=true; qApply('low'); toast('\u2699 Auto: LOW (press G to cycle quality)'); } } else if(diag.fps>=45){ autoLowT=0; } }
 
   updatePlayer(dt);
 
@@ -1278,6 +1354,9 @@ function animate(){
   for(const b of bays){
     if(b.state==='arriving' && b.car){
       b.car.position.z = THREE.MathUtils.lerp(b.car.position.z, b.driveTo, dt*1.6);
+      // settle straight into the bay as it approaches
+      const near=THREE.MathUtils.clamp(1-(b.car.position.z-b.driveTo)/9,0,1);
+      b.car.rotation.y = Math.PI + (b.x-b.car.position.x)*0.035*(1-near);
       if(b.tailRefl) b.tailRefl.position.z = b.car.position.z+1.4;
       if(b.headRefl) b.headRefl.position.z = b.car.position.z-1.2;
       if(b.cshadow) b.cshadow.position.z = b.car.position.z;
@@ -1287,7 +1366,7 @@ function animate(){
       const show = b.state==='charging';
       b.barG.visible=show;
       if(show){
-        b.barG.position.set(b.car.position.x, 1.34, b.car.position.z);
+        b.barG.position.set(b.car.position.x, 2.05, b.car.position.z);
         b.barG.lookAt(camera.position);
         const pct=Math.min(1,b.car.userData.battery);
         b.barFill.scale.x=Math.max(0.001,pct);
@@ -1313,17 +1392,36 @@ function animate(){
       const cost = fromGrid*spotPrice;
       b.sessionCost=(b.sessionCost||0)+cost;
       const rev = kwh*b.sell; revenue+=rev; b.sessionRev+=rev;
-      if(b.car.userData.battery>=1){ b.state='departing'; b.plugged=false; SFX.cash(); paySession(b); }
+      if(b.car.userData.battery>=1){ b.state='departing'; b.plugged=false; b.plug.position.copy(b.plugHome.pos); b.plug.rotation.copy(b.plugHome.rot); SFX.cash(); paySession(b); }
       // plug LED: pulse ring — scale plug emissive via material hack
       if(b.plug){ b.plug.traverse(o=>{ if(o.isMesh&&o.material&&o.material.emissive) o.material.emissiveIntensity = 6+Math.sin(now/120)*4; }); }
     }
     if(b.state==='departing' && b.car){
-      b.car.position.z = THREE.MathUtils.lerp(b.car.position.z, 20, dt*1.2);
-      b.car.position.x += (b.x<0?-1:1)*dt*0.4;
-      if(b.tailRefl) b.tailRefl.position.z = b.car.position.z+1.4;
-      if(b.headRefl) b.headRefl.position.z = b.car.position.z-1.2;
-      if(b.cshadow) b.cshadow.position.z = b.car.position.z;
-      if(b.car.position.z>18){ scene.remove(b.car); b.car=null; if(b.tailRefl){scene.remove(b.tailRefl);b.tailRefl=null;} if(b.headRefl){scene.remove(b.headRefl);b.headRefl=null;} if(b.cshadow){scene.remove(b.cshadow);b.cshadow=null;} b.state='empty';
+      const dep=b.car.userData.dep || (b.car.userData.dep={stage:0, dir:(b.x<=0?1:-1), v:0});
+      if(dep.stage===0){
+        // reverse straight out of the bay (car front is -Z, reverse = +Z)
+        dep.v=Math.min(1.6, dep.v+dt*1.2);
+        b.car.position.z += dep.v*dt;
+        if(b.cshadow){ b.cshadow.position.set(b.car.position.x,0.018,b.car.position.z); }
+        if(b.car.position.z>9.8){ dep.stage=1; dep.v=0; }
+      } else if(dep.stage===1){
+        // pivot on the road: point front along the road direction
+        b.car.position.z += 0.4*dt;
+        const targetYaw = dep.dir>0 ? Math.PI/2 : -Math.PI/2; // heading +X or -X
+        b.car.rotation.y = lerpAng(b.car.rotation.y, targetYaw, Math.min(1,dt*2.2));
+        if(b.cshadow){ b.cshadow.rotation.y = b.car.rotation.y; }
+        b.car.position.x += (targetYaw>0?1:-1)*dep.v*dt*0.5; dep.v=Math.min(1,dep.v+dt);
+        if(Math.abs(b.car.rotation.y-targetYaw)<0.06){ dep.stage=2; }
+      } else {
+        // drive off along the road
+        dep.v=Math.min(7.5, dep.v+dt*3.2);
+        b.car.position.x += dep.dir*dep.v*dt;
+        if(b.cshadow){ b.cshadow.position.set(b.car.position.x,0.018,b.car.position.z); }
+      }
+      if(b.tailRefl) b.tailRefl.visible=false;
+      if(b.headRefl){ b.headRefl.visible=false; }
+      if(b.barG) b.barG.visible=false;
+      if(Math.abs(b.car.position.x)>30 || b.car.position.z>24){ scene.remove(b.car); b.car=null; if(b.tailRefl){scene.remove(b.tailRefl);b.tailRefl=null;} if(b.headRefl){scene.remove(b.headRefl);b.headRefl=null;} if(b.cshadow){scene.remove(b.cshadow);b.cshadow=null;} b.state='empty';
         if(b.plug){ b.plug.position.copy(b.plugHome.pos); b.plug.rotation.copy(b.plugHome.rot); }
         b.plugged=false; grabbedBay = (grabbedBay===b)?null:grabbedBay; docked=false;
         b.nextArrT = performance.now()+5000+Math.random()*10000;
@@ -1343,18 +1441,46 @@ function animate(){
   revEl.textContent = '$'+revenue.toFixed(2);
   servedEl.textContent = served;
 
-  // held plug follows camera with spring
+  // held plug follows camera with spring, RANGE-LIMITED by cable length
   if(grabbedBay && !docked){
     const tp=new THREE.Vector3(); camera.getWorldDirection(tp);
-    const target=camera.position.clone().addScaledVector(tp,0.55).add(new THREE.Vector3(0.12,-0.18,0));
+    let target=camera.position.clone().addScaledVector(tp,0.55).add(new THREE.Vector3(0.12,-0.18,0));
+    const home=grabbedBay.plugHome.pos;
+    const reach=target.clone().sub(home);
+    if(reach.length()>CABLE_RANGE){ reach.setLength(CABLE_RANGE); target=home.clone().add(reach); grabbedBay.plugTaut=true; }
+    else grabbedBay.plugTaut=false;
     grabbedBay.plug.position.lerp(target, 1-Math.pow(0.0001,dt));
     const look=target.clone().add(tp);
     grabbedBay.plug.lookAt(look);
   }
+  // per-bay cables: end A = holster, end B = plug (hand/port/home)
+  for(const b of bays){
+    if(!b.cable) continue;
+    const a=b.plugHome.pos;
+    let cB;
+    if(b.plugged && b.car && b.state!=='departing'){ cB=bayPort(b).add(new THREE.Vector3(0,0.05,0)); }
+    else cB=b.plug.position;
+    // plug reeling back to holster when far and free
+    if(!b.plugged && grabbedBay!==b && b.plug.position.distanceTo(a)>0.3){
+      b.plug.position.lerp(a, 1-Math.pow(0.002,dt));
+    }
+    cableStep(b.cable, a, cB, dt);
+    // port ring indicator while this bay's connector is held
+    if(b.portRing){
+      const wantVis = (!b.plugged && b.car && (grabbedBay===b || !grabbedBay)) ;
+      const isTarget = grabbedBay===b;
+      b.portRing.material.opacity += ((isTarget? (0.85+0.15*Math.sin(now/150)) : (wantVis? 0.3:0)) - b.portRing.material.opacity)*Math.min(1,dt*8);
+      if(b.car){ const p=bayPort(b); b.portRing.position.copy(p); b.portRing.lookAt(camera.position);
+        b.portRing.scale.setScalar(isTarget? 1.15+0.1*Math.sin(now/150):1); }
+    }
+    // charge flow pulse on cable while charging
+    if(b.cable.mesh && b.state==='charging'){ b.cable.mesh.material.emissive=b.cable.mesh.material.emissive||new THREE.Color(); b.cable.mesh.material.emissive.setHex(0x0b3520); b.cable.mesh.material.emissiveIntensity=0.9+0.5*Math.sin(now/110); }
+    else if(b.cable.mesh && b.cable.mesh.material.emissive){ b.cable.mesh.material.emissiveIntensity=0; }
+  }
 
   // prompt text
   const t=currentTarget();
-  if(grabbedBay && !docked) promptEl.innerHTML='Press <b>E</b> at port to lock', promptEl.classList.add('show');
+  if(grabbedBay && !docked) promptEl.innerHTML = grabbedBay.plugTaut? '<b class="warn">Cable taut</b> — back toward the car port · <b>E</b> to lock' : 'Press <b>E</b> at port to lock', promptEl.classList.add('show');
   else if(t&&t.type==='car'&&t.bay.plugged&&t.bay.state==='charging') promptEl.innerHTML='<b>R</b> pause · <b>E</b> unplug', promptEl.classList.add('show');
   else if(t&&t.type==='car'&&t.bay.plugged&&t.bay.state==='ready') promptEl.innerHTML='<b>R</b> resume · <b>E</b> unplug', promptEl.classList.add('show');
   else if(t&&t.type==='charger'&&!grabbedBay&&!t.bay.plugged) promptEl.innerHTML='Press <b>E</b> — grab connector', promptEl.classList.add('show');
@@ -1421,6 +1547,9 @@ composer.insertPass(finalPass, composer.passes.length-1);
 
 // resize
 addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); composer.setSize(innerWidth,innerHeight); if(ssao) ssao.setSize(innerWidth,innerHeight); });
+addEventListener('resize',()=>{ if(Q.mode==='auto') qApply('auto'); });
+qApply(localStorage.getItem(QKEY)||'auto');
+addEventListener('keydown', e=>{ if(e.code==='KeyG'){ const order=['auto','high','med','low']; qApply(order[(order.indexOf(Q.mode)+1)%4]); } });
 
 // diagnostics for capture harness
 const diag={ fps:0, calls:()=>renderer.info.render.calls, tris:()=>renderer.info.render.triangles };
@@ -1442,6 +1571,7 @@ window.__GAME = {
   forceArr(i,vip){ const b=bays[i]; if(b.state!=='empty') return 'busy'; spawnCar(b,false,!!vip); return 'ok'; },
   info(){ return {nightK:+nightK.toFixed(3), clock:Math.floor(gameClock), protos:carProtos.length, fixtures:nightFixtures.length}; },
   camPos(){ return {x:+camera.position.x.toFixed(2), y:+camera.position.y.toFixed(2), z:+camera.position.z.toFixed(2)}; },
+  setBatt(i,v){ if(bays[i].car){ bays[i].car.userData.battery=v; return 'ok'; } return 'nocar'; },
   solar(){ return {last:+solarLast.toFixed(2), stored:+solarKwh.toFixed(2), capKW:SOLAR_CAP_KW}; },
   // ---- soak-test hooks: drive the REAL interaction path ----
   bayState(i){ const b=bays[i]; return {state:b.state, batt:b.car?+b.car.userData.battery.toFixed(3):null, kwh:+(b.chargeKwh||0).toFixed(3), pat:b.car?+((performance.now()-b.car.userData.arrived)/1000).toFixed(1):null}; },

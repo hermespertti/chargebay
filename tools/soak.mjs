@@ -88,8 +88,8 @@ await S('window.__GAME.save()');
 const raw=await S('localStorage.getItem("chargebay_save_v1")');
 check('save written', !!raw && JSON.parse(raw).v===1, raw? 'ok':'none');
 
-// car respawn after departure
-await sleep(20000);
+// car respawn after departure (drive-away takes longer now)
+await sleep(35000);
 const rb=await S('window.__GAME.bayState(0)');
 check('respawn after departure', rb.state==='arriving'||rb.state==='parked', JSON.stringify(rb));
 
