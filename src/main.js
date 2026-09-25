@@ -523,7 +523,7 @@ const loader = new GLTFLoader();
 function loadGLB(path){ return new Promise((res,rej)=>{ const to=setTimeout(()=>rej(new Error('timeout '+path)), 120000); loader.load(path,(g)=>{clearTimeout(to);res(g);},(e)=>{},(e)=>{clearTimeout(to);rej(new Error('loadfail '+path+' '+(e&&(e.message||e.type||''))));}); }); }
 
 let chargerProto=null, carProtos=[];
-const bays = BAYS.map(x=>({ x, charger:null, car:null, state:'empty', plug:null, plugHome:null, chargeKwh:0, sessionRev:0, price:0.124 }));
+const bays = BAYS.map(x=>({ x, charger:null, car:null, state:'empty', plug:null, plugHome:null, chargeKwh:0, sessionRev:0, sessionCost:0, price:0.124, tier:0, kw:150, sell:0.25 }));
 
 const PAINTS = [0x0a2e6b, 0xe8dcc8, 0x8f0f14, 0x1c2026, 0x0f4d3a, 0x6b6e73];
 function orientCar(obj){
@@ -621,11 +621,49 @@ async function loadAssets(){
   console.log('STAGE props');
   await loadProps();
   console.log('STAGE propsdone');
-  spawnCar(bays[0], true); spawnCar(bays[2], true); spawnCar(bays[1], true);
+  if(!loadGame()){ bays[3].locked=true; }
+  applyLocked();
+  if(bufferOwned) addBuffer();
+  bays.forEach(b=>{ if(!b.locked){ spawnCar(b, true); b.nextArrT = performance.now()+4000+Math.random()*5000; } });
   ready=true;
   // NOTE: do NOT auto-hide #start — overlay stays until the player actually
   // engages (click-lock on desktop, tap on touch). Capture harness hides it itself.
   if(!window.__GAMESPAWN) window.dispatchEvent(new Event('gamespawn'));
+}
+function applyLocked(){
+  bays.forEach(b=>{
+    if(b.charger){ b.charger.visible=true; b.charger.traverse(o=>{ if(o.isMesh&&o.material&&o.material.emissive){ o.material=o.material.clone?o.material.clone():o.material; o.material.emissive.setHex(b.locked?0x7a2020:0x1a2a3a); } }); }
+    if(b.plug){ b.plug.visible = !b.locked; }
+    if(b.locked && b.car){ scene.remove(b.car); b.car=null; b.state='empty'; }
+  });
+}
+let bufferMesh=null, bufferLight=null;
+function addBuffer(){
+  if(bufferMesh) return;
+  bufferMesh=new THREE.Mesh(new THREE.BoxGeometry(2.4,1.4,1.1), new THREE.MeshStandardMaterial({color:0x20262e, metalness:0.7, roughness:0.35, envMapIntensity:1.4}));
+  bufferMesh.position.set(9.6,0.7,-6.2); bufferMesh.castShadow=true; scene.add(bufferMesh);
+  const lens=new THREE.Mesh(new THREE.PlaneGeometry(2.0,0.22), new THREE.MeshStandardMaterial({color:0x0a1410, emissive:0x35e07c, emissiveIntensity:1.6}));
+  lens.position.set(9.6,1.05,-5.64); scene.add(lens); bufferMesh.userData.lens=lens;
+  bufferLight=new THREE.PointLight(0x35e07c, 6, 6, 1.8); bufferLight.position.set(9.6,1.2,-5.2); scene.add(bufferLight);
+}
+function upgradeBay(b){
+  if(b.locked){ toast('Unlock this bay first (N)'); return; }
+  const nx=TIERS[b.tier+1]; if(!nx){ toast('Already top tier'); return; }
+  if(cash<nx.cost){ toast('❌ Need $'+nx.cost); return; }
+  cash-=nx.cost; b.tier++; b.kw=nx.kw; dayCost+=nx.cost;
+  SFX.cash(); toast('🔧 Upgraded to '+nx.kw+' kW');
+  if(b.charger) b.charger.traverse(o=>{ if(o.isMesh&&o.material&&o.material.emissive) o.material.emissiveIntensity=2.2; });
+}
+function buyBuffer(){
+  if(bufferOwned){ toast('Buffer already installed'); return; }
+  if(cash<BUFFER_COST){ toast('❌ Need $'+BUFFER_COST); return; }
+  cash-=BUFFER_COST; dayCost+=BUFFER_COST; bufferOwned=true; addBuffer(); SFX.cash(); toast('🔋 Battery buffer installed');
+}
+function unlockBay(b){
+  if(!b.locked){ toast('Bay already unlocked'); return; }
+  if(cash<1200){ toast('❌ Need $1200'); return; }
+  cash-=1200; dayCost+=1200; b.locked=false; applyLocked(); SFX.cash(); toast('🟺 Bay '+(BAYS.indexOf(b.x)+1)+' unlocked');
+  b.nextArrT = performance.now()+2000+Math.random()*4000;
 }
 let plugsProto=null;
 async function loadPlugs(){
@@ -676,11 +714,18 @@ addEventListener('keyup',e=>keys[e.code]=false);
 let ready=false;
 let grabbedBay=null, docked=false;
 const PACK_KWH = 75; // kWh per full charge
-let revenue=0, served=0;
+const TIERS = [ {kw:150,cost:0}, {kw:350,cost:800}, {kw:600,cost:2000} ];
+const BUFFER_COST=600, BUFFER_CAP=200, BUFFER_RATE_KWH_MIN=0.5; // buffer charge rate at cheap prices
+const SAVE_KEY='chargebay_save_v1';
+let revenue=0, served=0;            // session
+let cash=500, day=1, dayRev=0, dayCost=0, servedTotal=0;   // meta
+let bufferOwned=false, bufferKwh=0, bufferDraining=0;
+const sellPrice=()=> spotPrice*1.9+0.02;
 const clockEl=document.getElementById('clock'), priceEl=document.getElementById('price'),
       revEl=document.getElementById('rev'), servedEl=document.getElementById('served'),
       loadEl=document.getElementById('load'), wxEl=document.getElementById('wx'),
-      promptEl=document.getElementById('prompt'), toastEl=document.getElementById('toast');
+      promptEl=document.getElementById('prompt'), toastEl=document.getElementById('toast'),
+      cashEl=document.getElementById('cash'), dayEl=document.getElementById('day'), bufEl=document.getElementById('buf');
 
 function toast(msg){ toastEl.innerHTML=msg; toastEl.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>toastEl.classList.remove('show'),2200); }
 
@@ -737,6 +782,10 @@ function onKey(e){
   if(e.code==='KeyE') tryInteract();
   if(e.code==='KeyR') toggleCharge();
   if(e.code==='KeyM'){ const m=SFX.toggleMute(); toast(m?'🔇 Muted':'🔊 Sound on'); }
+  if(e.code==='KeyU'){ const t=currentTarget(); if(t) upgradeBay(t.bay); }
+  if(e.code==='KeyB'){ buyBuffer(); }
+  if(e.code==='KeyN'){ const t=currentTarget(); if(t&&t.bay.locked) unlockBay(t.bay); }
+  if(e.code==='KeyP'){ saveGame(); toast('💾 Saved'); }
 }
 
 // controller
@@ -856,7 +905,40 @@ function currentTarget(){
   return null;
 }
 
-function paySession(b){ if((b.chargeKwh||0)>0.05){ served++; } b.sessionRev=0; }
+function paySession(b){
+  if((b.chargeKwh||0)>0.05){
+    served++; servedTotal++;
+    const prof=b.sessionRev-b.sessionCost; cash+=prof; dayRev+=b.sessionRev; dayCost+=b.sessionCost;
+    toast('🎉 Charge complete · +$'+b.sessionRev.toFixed(2)+' · profit <b>$'+prof.toFixed(2)+'</b>');
+  }
+  b.sessionRev=0; b.sessionCost=0;
+}
+function saveGame(){
+  try{
+    const d={ v:1, cash, day, dayRev, dayCost, servedTotal, bufferOwned, bufferKwh,
+      bays: bays.map(b=>({ tier:b.tier, locked:!!b.locked, sell:b.sell })), raining, gameClock, spotPrice, ts:Date.now() };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(d));
+  }catch(e){}
+}
+function loadGame(){
+  try{
+    const raw=localStorage.getItem(SAVE_KEY); if(!raw) return false;
+    const d=JSON.parse(raw); if(!d||d.v!==1) return false;
+    cash=d.cash??cash; day=d.day??day; dayRev=d.dayRev||0; dayCost=d.dayCost||0; servedTotal=d.servedTotal||0;
+    bufferOwned=!!d.bufferOwned; bufferKwh=d.bufferKwh||0; raining=d.raining??raining; gameClock=d.gameClock??gameClock; spotPrice=d.spotPrice??spotPrice;
+    if(Array.isArray(d.bays)) d.bays.forEach((sb,i)=>{ if(bays[i]){ bays[i].tier=sb.tier||0; bays[i].locked=!!sb.locked; bays[i].sell=sb.sell||0.25; bays[i].kw=TIERS[bays[i].tier].kw; } });
+    return true;
+  }catch(e){ return false; }
+}
+function endDay(){
+  day++;
+  const profit=dayRev-dayCost;
+  showDaySummary(day-1, dayRev, dayCost, profit);
+  dayRev=0; dayCost=0;
+  saveGame();
+}
+let daySummaryT=0;
+function showDaySummary(d,rev,cost,profit){ daySummaryT=performance.now(); toast('🌙 Day '+d+' done · rev $'+rev.toFixed(2)+' · cost $'+cost.toFixed(2)+' · profit <b>$'+profit.toFixed(2)+'</b>'); }
 
 function tryInteract(){
   const t = currentTarget();
@@ -911,7 +993,7 @@ function toggleCharge(forceBay){
   if(!b){ toast('Aim at a charger'); return; }
   if(!b.plugged){ toast('Dock the connector first (E)'); return; }
   if(b.state==='charging'){ b.state='ready'; SFX.click(180); toast('⏸ Charging paused'); return; }
-  b.state='charging'; b.price=spotPrice; b.kwhStart=0; b.chargeKwh=0;
+  b.state='charging'; b.price=spotPrice; b.sell=sellPrice(); b.kwhStart=0; b.chargeKwh=0; b.sessionCost=0;
   if(grabbedBay===b){ grabbedBay=null; docked=false; } // hand released, plug stays on car
   SFX.click(420); toast('⚡ Charging at 350 kW');
 }
@@ -984,6 +1066,31 @@ function animate(){
   const hh=Math.floor(gameClock/60)%24, mm=Math.floor(gameClock%60);
   clockEl.textContent = String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
   spotPrice = 0.10+0.06*Math.sin(gameClock/47)+0.02*Math.sin(gameClock/7.3);
+  // ---- economy tick ----
+  // grid buys are a cost; cheap-price surplus charges the buffer
+  if(bufferOwned){
+    if(spotPrice<0.085 && bufferKwh<BUFFER_CAP){
+      // cheap grid power: buffer charges up (cost added to dayCost)
+      const add=Math.min(BUFFER_CAP-bufferKwh, 60*dt); // 60 kWh per real minute
+      bufferKwh+=add; dayCost+=add*spotPrice;
+      if(bufferMesh&&bufferMesh.userData.lens) bufferMesh.userData.lens.material.emissive.setHex(0xf0c060);
+    } else if(bufferDraining===0){
+      if(bufferMesh&&bufferMesh.userData.lens) bufferMesh.userData.lens.material.emissive.setHex(0x35e07c);
+    }
+    bufferDraining=0;
+  }
+  // arrival scheduler: each unlocked empty bay pulls a car at a rate scaled by price (cheap power -> more traffic)
+  if(ready && carProtos.length){
+  for(const b of bays){
+    if(b.locked) continue;
+    if(b.state==='empty' && b.nextArrT && now>=b.nextArrT){
+      spawnCar(b, false);
+      b.nextArrT = now + (12000 - Math.min(8000, spotPrice*40000)) * (0.6+Math.random()*0.8);
+    }
+  }
+  }
+  // day rollover at 00:00
+  if(gameClock>=24*60){ gameClock-=24*60; endDay(); }
   priceEl.textContent = (spotPrice*100).toFixed(1)+'¢/kWh';
   sign.drawSign(spotPrice*100);
   fog.density = 0.007 + raining*0.0015;
@@ -1015,7 +1122,7 @@ function animate(){
       if(b.tailRefl) b.tailRefl.position.z = b.car.position.z+1.4;
       if(b.headRefl) b.headRefl.position.z = b.car.position.z-1.2;
       if(b.cshadow) b.cshadow.position.z = b.car.position.z;
-      if(Math.abs(b.car.position.z-b.driveTo)<0.05){ b.state='parked'; SFX.chime(660,880); toast('🚗 New arrival — bay '+(BAYS.indexOf(b.x)+1)); }
+      if(Math.abs(b.car.position.z-b.driveTo)<0.05){ b.state='parked'; b.car.userData.arrived=performance.now(); SFX.chime(660,880); toast('🚗 New arrival — bay '+(BAYS.indexOf(b.x)+1)); }
     }
     if(b.barG && b.car){
       const show = (b.state==='charging'||b.state==='ready') && b.plugged;
@@ -1032,13 +1139,19 @@ function animate(){
       }
     }
     if(b.state==='charging' && b.car){
-      const add = dt*0.02; // fraction of pack per real second (~45 s full charge, game-time compressed)
+      const add = dt*(b.kw/350)*0.02; // 600 kW tiers fill twice as fast
       const kwh = add*PACK_KWH;
       b.car.userData.battery=Math.min(1,b.car.userData.battery+add);
       b.chargeKwh=(b.chargeKwh||0)+kwh;
-      totalKw+=350;
-      const rev = kwh*b.price; revenue+=rev; b.sessionRev+=rev;
-      if(b.car.userData.battery>=1){ b.state='departing'; b.plugged=false; toast('🎉 Charge complete +$'+b.sessionRev.toFixed(2)); SFX.cash(); served++; b.sessionRev=0; }
+      totalKw+=b.kw;
+      // power sourcing: buffer first (free once charged), rest from grid at spot price
+      let fromBuf=Math.min(kwh, bufferOwned? bufferKwh:0);
+      bufferKwh-=fromBuf; if(fromBuf>0) bufferDraining+=fromBuf;
+      const fromGrid=kwh-fromBuf;
+      const cost = fromGrid*spotPrice;
+      b.sessionCost=(b.sessionCost||0)+cost;
+      const rev = kwh*b.sell; revenue+=rev; b.sessionRev+=rev;
+      if(b.car.userData.battery>=1){ b.state='departing'; b.plugged=false; SFX.cash(); paySession(b); }
       // plug LED: pulse ring — scale plug emissive via material hack
       if(b.plug){ b.plug.traverse(o=>{ if(o.isMesh&&o.material&&o.material.emissive) o.material.emissiveIntensity = 6+Math.sin(now/120)*4; }); }
     }
@@ -1051,7 +1164,7 @@ function animate(){
       if(b.car.position.z>18){ scene.remove(b.car); b.car=null; if(b.tailRefl){scene.remove(b.tailRefl);b.tailRefl=null;} if(b.headRefl){scene.remove(b.headRefl);b.headRefl=null;} if(b.cshadow){scene.remove(b.cshadow);b.cshadow=null;} b.state='empty';
         if(b.plug){ b.plug.position.copy(b.plugHome.pos); b.plug.rotation.copy(b.plugHome.rot); }
         b.plugged=false; grabbedBay = (grabbedBay===b)?null:grabbedBay; docked=false;
-        setTimeout(()=>spawnCar(b), 2500+Math.random()*6000);
+        b.nextArrT = performance.now()+5000+Math.random()*10000;
       }
     }
     // patience: idle parked/held car leaves
@@ -1062,6 +1175,9 @@ function animate(){
   }
   if(totalKw>0) SFX.setCharge(true, totalKw/350); else SFX.setCharge(false);
   loadEl.textContent = totalKw+' kW';
+  if(cashEl){ cashEl.textContent='$'+cash.toFixed(2); cashEl.className = cash>=0?'good':'bad'; }
+  if(dayEl) dayEl.textContent=day;
+  if(bufEl) bufEl.textContent= bufferOwned? Math.round(bufferKwh)+' / '+BUFFER_CAP+' kWh' : '—';
   revEl.textContent = '$'+revenue.toFixed(2);
   servedEl.textContent = served;
 
@@ -1144,7 +1260,7 @@ window.__GAME = {
   carBoxes(){ const out=[]; for(const b of bays){ if(b.car){ const bb=new THREE.Box3().setFromObject(b.car); out.push({bay:b.x, state:b.state, min:bb.min.toArray().map(v=>+v.toFixed(2)), max:bb.max.toArray().map(v=>+v.toFixed(2))}); } } return out; },
   pose(x,y,z,ry,rx){ camera.position.set(x,y,z); camera.rotation.set(rx||0,ry,0); },
   groundInfo(){ const mats=[]; scene.traverse(o=>{ if(o.isMesh && o.geometry && o.geometry.type==='PlaneGeometry' && o.geometry.parameters && o.geometry.parameters.width===220){ const m=o.material; mats.push({name:m.name||'std', hasMap:!!m.map, mapSrc:m.image?m.image.src||m.image.currentSrc||('w'+m.image.width):null, repeat:m.map?[m.map.repeat.x,m.map.repeat.y]:null, rough:m.roughness, metal:m.metalness, vis:o.visible}); } }); return mats; },
-  weather(v){ raining=v; },
+  weather(v){ raining=Math.max(0,Math.min(1,v)); },
   serve(){ served+=1; },
   setClock(h){ gameClock=h*60; },
   // ---- soak-test hooks: drive the REAL interaction path ----
@@ -1153,8 +1269,14 @@ window.__GAME = {
   dock(i){ if(!bays[i].car) return 'nocar'; docked=false; grabbedBay=null; bays[i].plugged=true; bays[i].car.userData.docked=true; bays[i].state='ready'; return 'docked'; },
   energize(i){ toggleCharge(i); return i!=null? bays[i].state : (grabbedBay? grabbedBay.state : 'none'); },
   econ(){ return {revenue:+revenue.toFixed(2), served, price:+spotPrice.toFixed(4)}; },
+  loadKw(){ let t=0; for(const b of bays) if(b.state==='charging') t+=b.kw; return t; },
+  money(){ return {cash:+cash.toFixed(2), day, dayRev:+dayRev.toFixed(2), dayCost:+dayCost.toFixed(2), bufferKwh:+bufferKwh.toFixed(2), bufferOwned}; },
+  save(){ saveGame(); return localStorage.getItem('chargebay_save_v1')? 'saved':'fail'; },
   audio(){ return { active: !!(window.__SFXREF && window.__SFXREF.ctx), muted: SFX.muted }; },
 };
 
 loadAssets().catch(e=>{ console.error('asset load failed', e && e.type, e && e.message); ready=true; if(!envReady) envReady=true; });
+setInterval(()=>{ if(ready) saveGame(); }, 30000);
+addEventListener('beforeunload', ()=>{ if(ready) saveGame(); });
+addEventListener('keydown', e=>{ if(e.code==='Tab') e.preventDefault(); });
 animate();

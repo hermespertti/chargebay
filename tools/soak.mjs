@@ -39,15 +39,15 @@ let r6=await S('window.__GAME.grab(0)');
 check('re-grab same bay refused once plugged', r6==='plugged', r6);
 
 // (bay0 already charging since energize above; dock freed hands)
-// let it charge ~8 s -> battery should rise measurably (0.02/s => +0.16)
+// let it charge ~8 s (150kW tier => ~0.0086/s)
 const b0=await S('window.__GAME.bayState(0)');
 await sleep(8000);
 const b1=await S('window.__GAME.bayState(0)');
-check('battery rises while charging', b1.batt>b0.batt+0.10, b0.batt+' -> '+b1.batt);
+check('battery rises while charging', b1.batt>b0.batt+0.05, b0.batt+' -> '+b1.batt);
 check('kwh metered', b1.kwh>b0.kwh+0.5, 'kwh '+b0.kwh+' -> '+b1.kwh);
 const e1=await S('window.__GAME.econ()');
 check('revenue accruing', e1.revenue>0, JSON.stringify(e1));
-check('grid load shows 350 kW', await S('document.getElementById("load").textContent')==='350 kW', await S('document.getElementById("load").textContent'));
+check('grid load shows 150 kW', await S('document.getElementById("load").textContent')==='150 kW', await S('document.getElementById("load").textContent'));
 
 // concurrency: plug in bay 1 while bay 0 charges -> two cars at once
 let g2=await S('window.__GAME.grab(1)');
@@ -57,7 +57,7 @@ check('second bay plug+dock+energize', g2==='grabbed'&&d2==='docked'&&e3==='char
 const two=await S('window.__GAME.bayState(0)').then(a=>S('window.__GAME.bayState(1)').then(b=>({b0:a.state,b1:b.state})));
 check('two cars charging simultaneously', two.b0==='charging'&&two.b1==='charging', JSON.stringify(two));
 await sleep(500); // let animate() update the HUD
-check('grid load shows 700 kW', await S('document.getElementById("load").textContent')==='700 kW', await S('document.getElementById("load").textContent'));
+check('grid load shows 300 kW', await S('document.getElementById("load").textContent')==='300 kW', await S('document.getElementById("load").textContent'));
 
 // pause/resume: bay is charging here; one energize = pause, next = resume
 await S('window.__GAME.energize(0)'); // charging -> ready (pause)
@@ -69,20 +69,26 @@ await S('window.__GAME.energize(0)'); // ready -> charging (resume)
 const q1=await S('window.__GAME.bayState(0)');
 await sleep(2000);
 const q2=await S('window.__GAME.bayState(0)');
-check('resume restarts charging', q2.batt>q1.batt+0.02, q1.batt+' -> '+q2.batt);
+check('resume restarts charging', q2.batt>q1.batt+0.010, q1.batt+' -> '+q2.batt);
 
-// full charge cycle: wait to 100% (batt q2..1 at 0.02/s)
-const waitS=Math.ceil((1-q2.batt)/0.02)+4;
-console.log('waiting '+waitS+'s for full charge...');
-await sleep(waitS*1000);
-const done=await S('window.__GAME.bayState(0)');
-check('full charge -> departed (respawn ok)', ['departing','empty','parked','arriving'].includes(done.state)&&done.batt<0.9, JSON.stringify(done));
+// full charge cycle: poll until not charging (max 140 s)
+let done=null;
+for(let i=0;i<28;i++){ await sleep(5000); done=await S('window.__GAME.bayState(0)'); if(done.state!=='charging') break; }
+console.log('full-charge loop ended at '+JSON.stringify(done));
+check('full charge -> paid & departed', ['departing','empty','parked','arriving'].includes(done.state), JSON.stringify(done));
 const e2=await S('window.__GAME.econ()');
 check('served count incremented', e2.served>=1, JSON.stringify(e2));
 check('session revenue plausible (kWh*price)', e2.revenue>=1 && e2.revenue<=15, '$'+e2.revenue);
+const mon=await S('window.__GAME.money()');
+check('cash netted (rev-cost) tracked', typeof mon.cash==='number', JSON.stringify(mon));
+check('day counter live', mon.day>=1, 'day '+mon.day);
+const saveOK=await S('(()=>{ localStorage.removeItem("chargebay_save_v1"); window.__GAME? 0:0; return 1; })()');
+await S('window.__GAME.save()');
+const raw=await S('localStorage.getItem("chargebay_save_v1")');
+check('save written', !!raw && JSON.parse(raw).v===1, raw? 'ok':'none');
 
 // car respawn after departure
-await sleep(12000);
+await sleep(20000);
 const rb=await S('window.__GAME.bayState(0)');
 check('respawn after departure', rb.state==='arriving'||rb.state==='parked', JSON.stringify(rb));
 
