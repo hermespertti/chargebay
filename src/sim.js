@@ -25,6 +25,11 @@ export const sim = {
   dayStats: {served:0, profit:0, kicks:0, vipDone:0, fast:0, kwh:0},
   // interaction bridge (bays own car state; these name who holds what)
   ready: false, grabbedBay: null, docked: false,
+  // tuning constants mirrored here so subsystems can read via sim.*
+  MARKUP_MIN: 1.15, MARKUP_MAX: 3.4,
+  BUFFER_COST: 600, BUFFER_CAP: 200, BUFFER_RATE_KWH_MIN: 0.5,
+  SOLAR_CAP_KW: 24,
+  SAVE_KEY: 'chargebay_save_v1',
 };
 export const MARKUP_MIN = 1.15, MARKUP_MAX = 3.4;
 export const BUFFER_COST = 600, BUFFER_CAP = 200, BUFFER_RATE_KWH_MIN = 0.5;
