@@ -16,9 +16,9 @@ async function runMarkup(pg, markupVal, wallMs){
   const t0=Date.now();
   while(Date.now()-t0 < wallMs){
     await pg.evaluate(`(()=>{
-      const G=window.__GAME; const bs=G.bays();
-      for(let i=0;i<bs.length;i++){ const s=G.bayState(i); if(s.state==='parked') G.dock(i); }
-      if(G.cardOpen()) G.endDayNow();
+      const G=window.__GAME;
+      for(let i=0;i<4;i++){ const s=G.bayState(i); if(s.state==='parked') G.dock(i); }
+      // let days roll naturally at 24:00 (endDay resets stats); never spam endDayNow
     })()`);
     await new Promise(r=>setTimeout(r,900));
   }
