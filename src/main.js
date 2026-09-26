@@ -1269,7 +1269,7 @@ function endDay(){
   const profit=dayRev-dayCost;
   const made=goals.filter(g=>g.done).length;
   const allDone = goals.length && made===goals.length;
-  if(profit>0){ streak++; } else { streak=0; }
+  if(profit>0 && dayStats.served>0){ streak++; } else { streak=0; }
   let bonus=0; if(allDone){ bonus=100; cash+=bonus; repAdd(4); }
   showDayCard(day, dayRev, dayCost, profit, made, bonus);
   day++;
