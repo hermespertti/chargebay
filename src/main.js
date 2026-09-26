@@ -792,9 +792,12 @@ function upgradeBay(b){
 function buyTech(id){
   const tc=TECH[id]; if(!tc){ toast('Unknown tech'); return false; }
   if(techOwned[id]){ toast(tc.name+' already installed'); return false; }
+  if(rep < tc.rep){ toast('🔒 '+tc.name+' needs ★ '+tc.rep+' reputation ('+Math.round(rep)+' so far)'); SFX.chime(220,180); return false; }
   if(cash<tc.cost){ toast('❌ Need $'+tc.cost); return false; }
-  cash-=tc.cost; dayCost+=tc.cost; techOwned[id]=true; SFX.cash(); toast('🔬 Installed: '+tc.name+' — '+tc.desc); saveGame(); return true;
+  cash-=tc.cost; dayCost+=tc.cost; techOwned[id]=true; SFX.cash(); SFX.chime(660,990);
+  toast('🎉 <b>'+tc.name+'</b> installed · '+tc.eff+' now active'); flashTech(); saveGame(); return true;
 }
+function flashTech(){ const f=document.getElementById('techflash'); if(!f) return; f.style.display='block'; f.style.animation='none'; void f.offsetWidth; f.style.animation='tflash 1.6s ease-out forwards'; }
 function buyBuffer(){
   if(bufferOwned){ toast('Buffer already installed'); return; }
   if(cash<BUFFER_COST){ toast('❌ Need $'+BUFFER_COST); return; }
@@ -938,13 +941,19 @@ function pickSegment(){
 // ---- reputation ----
 let rep = 60;                       // 0..100, arrival traffic scales with it
 const repMult = ()=> 0.45 + (rep/100)*1.15;   // 0.45x..1.6x arrival rate
-function repAdd(v){ rep=THREE.MathUtils.clamp(rep+v,0,100); }
+function repAdd(v){ rep=THREE.MathUtils.clamp(rep+v,0,100); paintRep(v); }
+let repFlashT=0;
+function paintRep(delta){
+  const el=document.getElementById('rep'); if(!el) return;
+  el.innerHTML = '★ '+Math.round(rep) + (delta? ' <span class="'+(delta>0?'good':'bad')+'">'+(delta>0?'▲+'+delta.toFixed(1):'▼'+delta.toFixed(1))+'</span>' : '');
+  if(delta) repFlashT=performance.now();
+}
 // ---- tech tree ----
 const TECH = {
-  heater:  { name:'Battery heater pads', cost:500,  desc:'Cold snaps no longer slow charging chemistry.' },
-  inverter:{ name:'Smart inverters',     cost:900,  desc:'+12% charge efficiency — cheaper sessions, more profit.' },
-  ads:     { name:'Advertising network', cost:700,  desc:'+25% arrivals from billboards & maps apps.' },
-  priority:{ name:'VIP priority lane',   cost:1100, desc:'VIP cars always get the next free bay instantly.' },
+  heater:  { name:'Battery heater pads', cost:500,  rep:50,  desc:'Cold snaps no longer slow charging chemistry.', eff:'−65% cold penalty' },
+  inverter:{ name:'Smart inverters',     cost:900,  rep:60,  desc:'+12% charge efficiency — cheaper sessions, more profit.', eff:'+12% efficiency' },
+  ads:     { name:'Advertising network', cost:700,  rep:70,  desc:'+25% arrivals from billboards & maps apps.', eff:'+25% traffic' },
+  priority:{ name:'VIP priority lane',   cost:1100, rep:80,  desc:'VIP cars always get the next free bay instantly.', eff:'VIP instant bay' },
 };
 let techOwned = {};
 const BUFFER_COST=600, BUFFER_CAP=200, BUFFER_RATE_KWH_MIN=0.5; // buffer charge rate at cheap prices
@@ -1623,7 +1632,7 @@ function animate(){
   if(cashEl){ cashEl.textContent='$'+cash.toFixed(2); cashEl.className = cash>=0?'good':'bad'; }
   if(dayEl) dayEl.textContent=day;
   const repEl=document.getElementById('rep');
-  if(repEl){ repEl.textContent='★ '+Math.round(rep); repEl.className = rep>=70?'good':(rep>=40?'':'bad'); }
+  if(repEl && performance.now()-repFlashT>2600){ repEl.textContent='★ '+Math.round(rep); repEl.className = rep>=70?'good':(rep>=40?'':'bad'); }
   if(bufEl) bufEl.textContent = (bufferOwned? Math.round(bufferKwh)+' / '+BUFFER_CAP+' kWh':'—') + (solarLast>0.02? ' · ☀ '+Math.round(solarLast*SOLAR_CAP_KW)+' kW':'');
   revEl.textContent = '$'+revenue.toFixed(2);
   servedEl.textContent = served;
@@ -1811,6 +1820,7 @@ window.__GAME = {
   cardOpen(){ return !!(window.__GAME&&window.__GAME._cardOpen); },
   goalsState(){ return {goals, dayStats, streak}; },
   completeGoal(id){ const g=goals.find(x=>x.id===id); if(g&&!g.done){ dayStats[g.key]=g.target; bumpGoal(g.key,0);} return 'ok'; },
+  techopen(){ toggleTechMenu(true); return 'ok'; },
   audio(){ return { active: !!(window.__SFXREF && window.__SFXREF.ctx), muted: SFX.muted }; },
 };
 
@@ -1851,10 +1861,13 @@ let techOpen=false;
 const TECH_ICONS={heater:'🌡️',inverter:'⚙️',ads:'📡',priority:'👑'};
 function renderTech(){
   const box=document.getElementById('techlist');
+  const tr=document.getElementById('techrep'); if(tr) tr.textContent='★ '+Math.round(rep)+' reputation';
   box.innerHTML=Object.keys(TECH).map((id,i)=>{
     const tc=TECH[id], own=!!techOwned[id];
-    const afford=cash>=tc.cost;
-    return '<div class="tcard'+(own?' owned':'')+'"><div class="ticon">'+(TECH_ICONS[id]||'🔬')+'</div><div class="tinfo"><b>'+(i+1)+'. '+tc.name+'</b><p>'+tc.desc+'</p></div>'+(own?'<button class="tbuy owned" disabled>OWNED</button>':'<button class="tbuy" data-tech="'+id+'" '+(afford?'':'disabled')+'>$'+tc.cost+'</button>')+'</div>';
+    const afford=cash>=tc.cost, repOK=rep>=tc.rep;
+    const lockTag = (!own && !repOK) ? '<span class="tlock">🔒 needs ★'+tc.rep+'</span>' : '';
+    const effTag = '<span class="teff">'+tc.eff+'</span>';
+    return '<div class="tcard'+(own?' owned':'')+(!repOK&&!own?' locked':'')+'"><div class="ticon">'+(TECH_ICONS[id]||'🔬')+'</div><div class="tinfo"><b>'+(i+1)+'. '+tc.name+' '+effTag+lockTag+'</b><p>'+tc.desc+'</p></div>'+(own?'<button class="tbuy owned" disabled>✓ ACTIVE</button>':'<button class="tbuy" data-tech="'+id+'" '+(afford&&repOK?'':'disabled')+'>'+(repOK?'$'+tc.cost:'★'+tc.rep)+'</button>')+'</div>';
   }).join('');
   box.querySelectorAll('[data-tech]').forEach(btn=>btn.addEventListener('click',()=>{ buyTech(btn.dataset.tech); renderTech(); }));
 }
