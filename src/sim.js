@@ -3,6 +3,8 @@
 export const sim = {
   // frame
   now: 0, dt: 0,
+  // bays registry (populated at boot)
+  bays: [],
   // clock & market
   gameClock: 18*60+42,           // minutes, dusk
   spotPrice: 0.124,

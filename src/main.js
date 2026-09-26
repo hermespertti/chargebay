@@ -220,7 +220,7 @@ loader.setDRACOLoader(draco);
 function loadGLB(path){ return new Promise((res,rej)=>{ const to=setTimeout(()=>rej(new Error('timeout '+path)), 120000); loader.load(path,(g)=>{clearTimeout(to);res(g);},(e)=>{},(e)=>{clearTimeout(to);rej(new Error('loadfail '+path+' '+(e&&(e.message||e.type||''))));}); }); }
 
 let chargerProto=null, carProtos=[], origProtos=[], segProto={};
-const bays = BAYS.map(x=>({ x, charger:null, car:null, state:'empty', plug:null, plugHome:null, chargeKwh:0, sessionRev:0, sessionCost:0, price:0.124, tier:0, kw:150, sell:0.25 }));
+sim.bays.push(...BAYS.map(x=>({ x, charger:null, car:null, state:'empty', plug:null, plugHome:null, chargeKwh:0, sessionRev:0, sessionCost:0, price:0.124, tier:0, kw:150, sell:0.25 })));
 
 const PAINTS = [0x0a2e6b, 0xe8dcc8, 0x8f0f14, 0x1c2026, 0x0f4d3a, 0x6b6e73];
 function orientCar(obj){
@@ -368,7 +368,7 @@ async function loadAssets(){
   }catch(e){ console.warn('fleet skipped', fd.seg, e&&e.message); }
   }
   // place chargers
-  bays.forEach((b,i)=>{
+  sim.bays.forEach((b,i)=>{
     const ch = chargerProto.clone(true);
     ch.position.set(b.x, 0, -6.0); ch.rotation.y = 0; ch.scale.setScalar(1.0);
     ch.traverse(o=>{ if(o.isMesh){o.castShadow=true; o.receiveShadow=true;} });
@@ -397,19 +397,19 @@ async function loadAssets(){
     console.log('STAGE ferrari ok');
   }catch(e){ console.warn('ferrari skipped', e && e.message); }
   collectNightLights();
-  if(!loadGame()){ bays[3].locked=true; }
+  if(!loadGame()){ sim.bays[3].locked=true; }
   if(!sim.goals.length) rollGoals(); paintGoals();
   document.getElementById('dcBtn').addEventListener('click',()=>{ hideDayCard(); if(!isTouch&&controls.isLocked===false) controls.lock(); });
   applyLocked();
   if(sim.bufferOwned) addBuffer();
-  bays.forEach(b=>{ if(!b.locked){ spawnCar(b, true); b.nextArrT = performance.now()+4000+Math.random()*5000; } });
+  sim.bays.forEach(b=>{ if(!b.locked){ spawnCar(b, true); b.nextArrT = performance.now()+4000+Math.random()*5000; } });
   sim.ready=true;
   // NOTE: do NOT auto-hide #start — overlay stays until the player actually
   // engages (click-lock on desktop, tap on touch). Capture harness hides it itself.
   if(!window.__GAMESPAWN) window.dispatchEvent(new Event('gamespawn'));
 }
 function applyLocked(){
-  bays.forEach(b=>{
+  sim.bays.forEach(b=>{
     if(b.charger){ b.charger.visible=true; b.charger.traverse(o=>{ if(o.isMesh&&o.material&&o.material.emissive){ o.material=o.material.clone?o.material.clone():o.material; o.material.emissive.setHex(b.locked?0x7a2020:0x1a2a3a); } }); }
     if(b.plug){ b.plug.visible = !b.locked; }
     if(b.locked && b.car){ scene.remove(b.car); b.car=null; b.state='empty'; }
@@ -455,7 +455,7 @@ function unlockBay(b){
 let plugsProto=null;
 async function loadPlugs(){
   const p = await loadGLB('assets/plug.glb'); plugsProto=p.scene;
-  bays.forEach(b=>{
+  sim.bays.forEach(b=>{
     const pl = plugsProto.clone(true);
     pl.position.set(b.x+0.70, 0.98, -6.0); pl.rotation.set(Math.PI,0,0); pl.scale.setScalar(1.15);
     pl.traverse(o=>{ if(o.isMesh){ o.castShadow=true; if(o.material && o.material.name==='CableJacket') o.visible=false; } });
@@ -705,7 +705,7 @@ function currentTarget(){
   if(!sim.ready) return null;
   ray.setFromCamera(new THREE.Vector2(0,0), camera);
   ray.far = 3.2;
-  for(const b of bays){
+  for(const b of sim.bays){
     if(!b.charger) continue;
     const hits = ray.intersectObject(b.charger, true);
     if(hits.length) return {bay:b, type:'charger'};
@@ -760,7 +760,7 @@ function paySession(b){
 function saveGame(){
   try{
     const d={ v:1, cash: sim.cash, day: sim.day, dayRev: sim.dayRev, dayCost: sim.dayCost, servedTotal: sim.servedTotal, bufferOwned: sim.bufferOwned, bufferKwh: sim.bufferKwh, rep: sim.rep, techOwned: sim.techOwned, goals: sim.goals, dayStats: sim.dayStats, streak: sim.streak,
-      bays: bays.map(b=>({ tier:b.tier, locked:!!b.locked, sell:b.sell })), raining: sim.raining, gameClock: sim.gameClock, spotPrice: sim.spotPrice, ts:Date.now(),
+      bays: sim.bays.map(b=>({ tier:b.tier, locked:!!b.locked, sell:b.sell })), raining: sim.raining, gameClock: sim.gameClock, spotPrice: sim.spotPrice, ts:Date.now(),
       vipPending: sim.vipPending, coldLeft: Math.max(0,sim.coldUntil-performance.now()), brownLeft: Math.max(0,sim.brownUntil-performance.now()), brownCap: sim.brownCap, solarKwh: sim.solarKwh };
     localStorage.setItem(sim.SAVE_KEY, JSON.stringify(d));
   }catch(e){}
@@ -771,7 +771,7 @@ function loadGame(){
     const d=JSON.parse(raw); if(!d||d.v!==1) return false;
     sim.cash=d.cash??sim.cash; sim.day=d.day??sim.day; sim.dayRev=d.dayRev||0; sim.dayCost=d.dayCost||0; sim.servedTotal=d.servedTotal||0;
     sim.bufferOwned=!!d.bufferOwned; sim.bufferKwh=d.bufferKwh||0; sim.raining=d.raining??sim.raining; sim.gameClock=d.gameClock??sim.gameClock; sim.spotPrice=d.spotPrice??sim.spotPrice; sim.rep=d.rep??sim.rep; sim.techOwned=d.techOwned||{};
-    if(Array.isArray(d.bays)) d.bays.forEach((sb,i)=>{ if(bays[i]){ bays[i].tier=sb.tier||0; bays[i].locked=!!sb.locked; bays[i].sell=sb.sell||0.25; bays[i].kw=TIERS[bays[i].tier].kw; } });
+    if(Array.isArray(d.bays)) d.bays.forEach((sb,i)=>{ if(sim.bays[i]){ sim.bays[i].tier=sb.tier||0; sim.bays[i].locked=!!sb.locked; sim.bays[i].sell=sb.sell||0.25; sim.bays[i].kw=TIERS[sim.bays[i].tier].kw; } });
     sim.vipPending=!!d.vipPending; sim.brownCap=d.brownCap||500; sim.solarKwh=d.solarKwh||0; sim.streak=d.streak||0; if(Array.isArray(d.goals)&&d.goals.length) sim.goals=d.goals; if(d.dayStats) sim.dayStats=d.dayStats;
     sim.coldUntil=performance.now()+(d.coldLeft||0); sim.brownUntil=performance.now()+(d.brownLeft||0);
     if(sim.bufferOwned) addBuffer();
@@ -875,7 +875,7 @@ function autoEnergize(b){
 }
 function toggleCharge(forceBay){
   // R is now just pause/resume — plugging in already starts charging.
-  let b= forceBay!=null ? bays[forceBay] : (sim.grabbedBay && sim.docked ? sim.grabbedBay : (currentTarget()? currentTarget().bay : null));
+  let b= forceBay!=null ? sim.bays[forceBay] : (sim.grabbedBay && sim.docked ? sim.grabbedBay : (currentTarget()? currentTarget().bay : null));
   if(!b){ toast('Aim at a charger'); return; }
   if(!b.plugged){ toast('Dock the connector first (E)'); return; }
   if(b.state==='charging'){ b.state='ready'; SFX.click(180); toast('⏸ Charging paused'); return; }
@@ -949,7 +949,7 @@ function animate(){
   }
   // arrival scheduler: each unlocked empty bay pulls a car at a rate scaled by price (cheap power -> more traffic)
   if(sim.ready && carProtos.length){
-  for(const b of bays){
+  for(const b of sim.bays){
     if(b.locked) continue;
     if(b.state==='empty' && b.nextArrT && now>=b.nextArrT){
       spawnCar(b, false, sim.vipPending && !sim.vipSpawned); if(sim.vipPending) sim.vipSpawned=true;
@@ -966,10 +966,10 @@ function animate(){
     if(r<0.34){ // cold snap: charge speed -35% for 60s
       sim.coldUntil=now+60000; SFX.chime(440,330); toast('🧊 Cold snap · charging slower for a minute');
     } else if(r<0.62){ // brownout: grid capped
-      sim.brownUntil=now+45000; sim.brownCap= bays.filter(x=>!x.locked).length>2? 500:350; SFX.chime(330,240); toast('⚠️ Brownout · grid capped at '+sim.brownCap+' kW');
+      sim.brownUntil=now+45000; sim.brownCap= sim.bays.filter(x=>!x.locked).length>2? 500:350; SFX.chime(330,240); toast('⚠️ Brownout · grid capped at '+sim.brownCap+' kW');
     } else if(r<0.82){ // VIP stranded car: urgent, big tip
       sim.vipPending=true; sim.vipSpawned=false; toast('👑 VIP stranded outside town — needs rescue charge!');
-      bays.forEach(b=>{ if(!b.locked && b.state==='empty') b.nextArrT = Math.min(b.nextArrT||0, now+(sim.techOwned.priority?1200:4000)); });
+      sim.bays.forEach(b=>{ if(!b.locked && b.state==='empty') b.nextArrT = Math.min(b.nextArrT||0, now+(sim.techOwned.priority?1200:4000)); });
     } else { // weather shift
       sim.raining = Math.random()<0.5? 0.15+Math.random()*0.2 : 0.65+Math.random()*0.35;
     }
@@ -1019,12 +1019,12 @@ function animate(){
   wxEl.textContent = wx;
   SFX.setRain(sim.raining);
   let maxSpd=0;
-  for(const b of bays){ if(b.car){ wetUpdate(b.car, dt, performance.now()); maxSpd=Math.max(maxSpd, b.car.userData.speed||0); b.car.userData.speed=0; } }
+  for(const b of sim.bays){ if(b.car){ wetUpdate(b.car, dt, performance.now()); maxSpd=Math.max(maxSpd, b.car.userData.speed||0); b.car.userData.speed=0; } }
   SFX.setTire(Math.min(1, maxSpd/9));
 
   // bay logic
   let totalKw=0;
-  for(const b of bays){
+  for(const b of sim.bays){
     if(b.state==='arriving' && b.car){
       b.car.position.z = THREE.MathUtils.lerp(b.car.position.z, b.driveTo, dt*1.6);
       // settle straight into the bay as it approaches
@@ -1144,7 +1144,7 @@ function animate(){
     sim.grabbedBay.plug.lookAt(look);
   }
   // per-bay cables: end A = gland on cabinet, end B = plug (hand/port/ring)
-  for(const b of bays){
+  for(const b of sim.bays){
     if(!b.cable) continue;
     const a=b.glandPos;
     let cB;
@@ -1244,10 +1244,10 @@ addEventListener('keydown', e=>{ if(e.code==='KeyG'){ const order=['auto','high'
 // diagnostics for capture harness
 const diag={ fps:0, calls:()=>renderer.info.render.calls, tris:()=>renderer.info.render.triangles };
 window.__GAME = {
-  diag, bays:()=>bays.map(b=>({state:b.state, batt:b.car?b.car.userData.battery:null, vip:b.car?!!b.car.userData.vip:false})),
+  diag, bays:()=>sim.bays.map(b=>({state:b.state, batt:b.car?b.car.userData.battery:null, vip:b.car?!!b.car.userData.vip:false})),
   carMats(){ const out=[]; const car=carProtos[0]; if(!car) return out; const seen=new Set(); car.traverse(o=>{ if(o.isMesh&&o.material){ const ms=Array.isArray(o.material)?o.material:[o.material]; for(const m of ms){ if(seen.has(m.uuid))continue; seen.add(m.uuid); out.push({name:m.name,metal:m.metalness,rough:m.roughness,env:m.envMapIntensity,cc:m.clearcoat!==undefined?m.clearcoat:null,color:m.color?m.color.getHexString():null}); } } }); return out; },
   ready:()=>sim.ready, envReady:()=>ATMO.envReady,
-  carBoxes(){ const out=[]; for(const b of bays){ if(b.car){ const bb=new THREE.Box3().setFromObject(b.car); out.push({bay:b.x, state:b.state, min:bb.min.toArray().map(v=>+v.toFixed(2)), max:bb.max.toArray().map(v=>+v.toFixed(2))}); } } return out; },
+  carBoxes(){ const out=[]; for(const b of sim.bays){ if(b.car){ const bb=new THREE.Box3().setFromObject(b.car); out.push({bay:b.x, state:b.state, min:bb.min.toArray().map(v=>+v.toFixed(2)), max:bb.max.toArray().map(v=>+v.toFixed(2))}); } } return out; },
   pose(x,y,z,ry,rx){ camera.position.set(x,y,z); camera.rotation.set(rx||0,ry,0); },
   lookAt(x,y,z,dist,up){ const c=camera.position; const d=new THREE.Vector3(x-c.x,y-c.y,z-c.z); d.normalize(); const p=c.clone().addScaledVector(d,-(dist||6)); camera.position.copy(p); const yaw=Math.atan2(-(x-p.x),-(z-p.z)); camera.rotation.set(0,yaw,0); },
   groundInfo(){ const mats=[]; scene.traverse(o=>{ if(o.isMesh && o.geometry && o.geometry.type==='PlaneGeometry' && o.geometry.parameters && o.geometry.parameters.width===220){ const m=o.material; mats.push({name:m.name||'std', hasMap:!!m.map, mapSrc:m.image?m.image.src||m.image.currentSrc||('w'+m.image.width):null, repeat:m.map?[m.map.repeat.x,m.map.repeat.y]:null, rough:m.roughness, metal:m.metalness, vis:o.visible}); } }); return mats; },
@@ -1260,55 +1260,55 @@ window.__GAME = {
     if(name==='brown'){ sim.brownUntil=t+45000; sim.brownCap=500; return 'brown'; }
     if(name==='vip'){ sim.vipPending=true; sim.vipSpawned=false; return 'vip'; }
     if(name==='rain'){ sim.raining=0.8; return 'rain'; } return 'none'; },
-  forceArr(i,vip){ const b=bays[i]; if(b.state!=='empty') return 'busy'; spawnCar(b,false,!!vip); return 'ok'; },
+  forceArr(i,vip){ const b=sim.bays[i]; if(b.state!=='empty') return 'busy'; spawnCar(b,false,!!vip); return 'ok'; },
   info(){ return {nightK:+ATMO.nightK.toFixed(3), clock:Math.floor(sim.gameClock), protos:carProtos.length, fixtures:nightFixtures.length}; },
   camPos(){ return {x:+camera.position.x.toFixed(2), y:+camera.position.y.toFixed(2), z:+camera.position.z.toFixed(2)}; },
-  setBatt(i,v){ if(bays[i].car){ bays[i].car.userData.battery=v; return 'ok'; } return 'nocar'; },
+  setBatt(i,v){ if(sim.bays[i].car){ sim.bays[i].car.userData.battery=v; return 'ok'; } return 'nocar'; },
   q(){ return {mode:Q.mode, fps:diag.fps, pxr:renderer.getPixelRatio?+renderer.getPixelRatio().toFixed(2):null}; },
   techState(){ return Object.assign({}, sim.techOwned); },
   techbuy(id){ return buyTech(id); },
   setCash(v){ sim.cash=v; return sim.cash; },
   repGet(){ return sim.rep; },
   techmenu(force){ toggleTechMenu(force); return techOpen; },
-  aimPort(i){ const b=bays[i]; if(!b.car) return 'nocar'; const p=bayPort(b); camera.position.set(p.x+1.35, p.y+0.15, p.z+0.45); camera.lookAt(p); return 'ok'; },
-  portPos(i){ const b=bays[i]; if(!b.car) return null; const p=bayPort(b); return {x:+p.x.toFixed(2),y:+p.y.toFixed(2),z:+p.z.toFixed(2)}; },
+  aimPort(i){ const b=sim.bays[i]; if(!b.car) return 'nocar'; const p=bayPort(b); camera.position.set(p.x+1.35, p.y+0.15, p.z+0.45); camera.lookAt(p); return 'ok'; },
+  portPos(i){ const b=sim.bays[i]; if(!b.car) return null; const p=bayPort(b); return {x:+p.x.toFixed(2),y:+p.y.toFixed(2),z:+p.z.toFixed(2)}; },
   forceSeg(i,id,ci){ const p=(segProto[id]&&segProto[id][ci||0])||(origProtos[0]); if(!p) return 'nopool';
-    const car=p.clone(true); if(bays[i].car){ scene.remove(bays[i].car); }
+    const car=p.clone(true); if(sim.bays[i].car){ scene.remove(sim.bays[i].car); }
     car.traverse(o=>{ if(o.isMesh){o.castShadow=true;o.receiveShadow=true;} });
     if(p.userData.protoPort) car.userData.portLocal=new THREE.Vector3(...p.userData.protoPort);
     car.userData={...car.userData, battery:0.2, need:0.9, patience:9999, arrived:performance.now(), vip:false, seg:(SEGMENTS.find(s=>s.id===id)||SEGMENTS[0]), packKwh:80, portLocal:(p.userData.protoPort?new THREE.Vector3(...p.userData.protoPort):car.userData.portLocal)};
-    bays[i].car=car; bays[i].state='parked'; bays[i].plugged=false; scene.add(car);
-    const p0=bays[i].car.position; car.position.set(bays[i].x,0,-3.1);
-    if(bays[i].cshadow){bays[i].cshadow.position.set(bays[i].x,0.018,-3.1);bays[i].cshadow.visible=true;}
+    sim.bays[i].car=car; sim.bays[i].state='parked'; sim.bays[i].plugged=false; scene.add(car);
+    const p0=sim.bays[i].car.position; car.position.set(sim.bays[i].x,0,-3.1);
+    if(sim.bays[i].cshadow){sim.bays[i].cshadow.position.set(sim.bays[i].x,0.018,-3.1);sim.bays[i].cshadow.visible=true;}
     return 'ok '+id; },
-  forceOrig(i,ci){ scene.traverse(o=>{ if(o.type==='Group'&&o!==bays[i]?.car&&o.userData&&o.userData.fleet) o.visible=false; });
-    bays.forEach((bb,j)=>{ if(j!==i&&bb.car){ bb.car.visible=false; } if(bb.cshadow&&j!==i) bb.cshadow.visible=false; });
-    const b=bays[i]; if(b.car){ scene.remove(b.car); b.car=null; }
+  forceOrig(i,ci){ scene.traverse(o=>{ if(o.type==='Group'&&o!==sim.bays[i]?.car&&o.userData&&o.userData.fleet) o.visible=false; });
+    sim.bays.forEach((bb,j)=>{ if(j!==i&&bb.car){ bb.car.visible=false; } if(bb.cshadow&&j!==i) bb.cshadow.visible=false; });
+    const b=sim.bays[i]; if(b.car){ scene.remove(b.car); b.car=null; }
     const proto=origProtos.length? origProtos[(ci||0)%origProtos.length] : null; if(!proto) return 'noproto';
     const car=proto.clone(true); car.traverse(o=>{ if(o.isMesh){o.castShadow=true;o.receiveShadow=true;} });
     car.userData={ battery:0.18, need:0.9, patience:9999, arrived:performance.now(), vip:false, seg:SEGMENTS[0], packKwh:75, portLocal:new THREE.Vector3(-0.60,0.62,-0.88) };
     car.position.set(b.x,0,-3.1); car.rotation.y=Math.PI; scene.add(car); b.car=car; b.state='parked'; b.plugged=false;
     if(b.cshadow){ b.cshadow.position.set(b.x, 0.018, -3.1); b.cshadow.visible=true; } else { b.cshadow=contactShadow(5.6,2.8,b.x,-3.1,0.9); }
     return 'ok'; },
-  carPos(i){ const b=bays[i]; if(!b.car) return null; return {x:+b.car.position.x.toFixed(2),y:+b.car.position.y.toFixed(2),z:+b.car.position.z.toFixed(2),yaw:+b.car.rotation.y.toFixed(2)}; },
-  plugBox(i){ const b=bays[i]; if(!b.plug) return null; const bb=new THREE.Box3().setFromObject(b.plug); return {min:[+bb.min.x.toFixed(2),+bb.min.y.toFixed(2),+bb.min.z.toFixed(2)],max:[+bb.max.x.toFixed(2),+bb.max.y.toFixed(2),+bb.max.z.toFixed(2)]}; },
-  plugRot(i,z,x){ const b=bays[i]; if(!b.plug) return 'noplug'; if(z!==undefined) b.plug.quaternion.setFromEuler(new THREE.Euler(x||0, 0, z, 'ZXY')); else b.plug.quaternion.set(0,0,0,1); b.plug.position.copy(bayPort(b)); return 'ok'; },
-  plugTip(i){ const b=bays[i]; if(!b.plug) return null; const v=new THREE.Vector3(0,1,0).applyQuaternion(b.plug.quaternion); return {x:+v.x.toFixed(2),y:+v.y.toFixed(2),z:+v.z.toFixed(2)}; },
-  dockVisual(i){ const b=bays[i]; if(!b.plug||!b.car) return 'nodata'; const port=bayPort(b); const inward=new THREE.Vector3(1,0,0).applyQuaternion(b.car.quaternion); const up=new THREE.Vector3(0,1,0); const xA=new THREE.Vector3().crossVectors(up,inward); if(xA.lengthSq()<1e-6) xA.set(1,0,0); xA.normalize(); const zA=new THREE.Vector3().crossVectors(inward,xA).normalize(); b.plug.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xA,inward,zA)); b.plug.position.copy(port).addScaledVector(inward,0.06); return this.plugTip(i); },
-  cableView(i){ const b=bays[i]; if(!b.car||!b.glandPos) return 'nodata'; const p=bayPort(b); const mid=p.clone().add(b.glandPos).multiplyScalar(0.5); const dir=p.clone().sub(b.glandPos); const side=new THREE.Vector3(-dir.z,0,dir.x).normalize(); camera.position.copy(mid).add(side.multiplyScalar(1.6)).add(new THREE.Vector3(0,0.55,0)); camera.lookAt(mid); return 'ok'; },
-  aimCharger(i){ const b=bays[i]; camera.position.set(b.x+1.9, 1.15, -4.3); const look=new THREE.Vector3(b.x,0.95,-6.0); camera.lookAt(look); return 'ok'; },
-  hidecars(v){ bays.forEach(b=>{ if(b.car) b.car.visible=!v; }); return 'ok'; },
-  onlycharger(i){ scene.traverse(o=>{ if(o.isMesh) o.visible=false; }); bays.forEach((b,j)=>{ if(b.charger){ b.charger.visible=(j===i); b.charger.traverse(o=>{ if(o.isMesh) o.visible=(j===i); }); } if(b.plug) b.plug.visible=(j===i); }); return 'ok'; },
+  carPos(i){ const b=sim.bays[i]; if(!b.car) return null; return {x:+b.car.position.x.toFixed(2),y:+b.car.position.y.toFixed(2),z:+b.car.position.z.toFixed(2),yaw:+b.car.rotation.y.toFixed(2)}; },
+  plugBox(i){ const b=sim.bays[i]; if(!b.plug) return null; const bb=new THREE.Box3().setFromObject(b.plug); return {min:[+bb.min.x.toFixed(2),+bb.min.y.toFixed(2),+bb.min.z.toFixed(2)],max:[+bb.max.x.toFixed(2),+bb.max.y.toFixed(2),+bb.max.z.toFixed(2)]}; },
+  plugRot(i,z,x){ const b=sim.bays[i]; if(!b.plug) return 'noplug'; if(z!==undefined) b.plug.quaternion.setFromEuler(new THREE.Euler(x||0, 0, z, 'ZXY')); else b.plug.quaternion.set(0,0,0,1); b.plug.position.copy(bayPort(b)); return 'ok'; },
+  plugTip(i){ const b=sim.bays[i]; if(!b.plug) return null; const v=new THREE.Vector3(0,1,0).applyQuaternion(b.plug.quaternion); return {x:+v.x.toFixed(2),y:+v.y.toFixed(2),z:+v.z.toFixed(2)}; },
+  dockVisual(i){ const b=sim.bays[i]; if(!b.plug||!b.car) return 'nodata'; const port=bayPort(b); const inward=new THREE.Vector3(1,0,0).applyQuaternion(b.car.quaternion); const up=new THREE.Vector3(0,1,0); const xA=new THREE.Vector3().crossVectors(up,inward); if(xA.lengthSq()<1e-6) xA.set(1,0,0); xA.normalize(); const zA=new THREE.Vector3().crossVectors(inward,xA).normalize(); b.plug.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xA,inward,zA)); b.plug.position.copy(port).addScaledVector(inward,0.06); return this.plugTip(i); },
+  cableView(i){ const b=sim.bays[i]; if(!b.car||!b.glandPos) return 'nodata'; const p=bayPort(b); const mid=p.clone().add(b.glandPos).multiplyScalar(0.5); const dir=p.clone().sub(b.glandPos); const side=new THREE.Vector3(-dir.z,0,dir.x).normalize(); camera.position.copy(mid).add(side.multiplyScalar(1.6)).add(new THREE.Vector3(0,0.55,0)); camera.lookAt(mid); return 'ok'; },
+  aimCharger(i){ const b=sim.bays[i]; camera.position.set(b.x+1.9, 1.15, -4.3); const look=new THREE.Vector3(b.x,0.95,-6.0); camera.lookAt(look); return 'ok'; },
+  hidecars(v){ sim.bays.forEach(b=>{ if(b.car) b.car.visible=!v; }); return 'ok'; },
+  onlycharger(i){ scene.traverse(o=>{ if(o.isMesh) o.visible=false; }); sim.bays.forEach((b,j)=>{ if(b.charger){ b.charger.visible=(j===i); b.charger.traverse(o=>{ if(o.isMesh) o.visible=(j===i); }); } if(b.plug) b.plug.visible=(j===i); }); return 'ok'; },
   qset(m){ qApply(m); return Q.mode; },
   solar(){ return {last:+sim.solarLast.toFixed(2), stored:+sim.solarKwh.toFixed(2), capKW:sim.SOLAR_CAP_KW}; },
   // ---- soak-test hooks: drive the REAL interaction path ----
-  bayState(i){ const b=bays[i]; return {state:b.state, batt:b.car?+b.car.userData.battery.toFixed(3):null, kwh:+(b.chargeKwh||0).toFixed(3), pat:b.car?+((performance.now()-b.car.userData.arrived)/1000).toFixed(1):null}; },
-  grab(i){ if(bays[i].plugged) return 'plugged'; if(sim.grabbedBay&&sim.grabbedBay!==bays[i]) return 'busy'; sim.grabbedBay=bays[i]; sim.docked=false; return 'grabbed'; },
-  dock(i){ if(!bays[i].car) return 'nocar'; sim.docked=false; sim.grabbedBay=null; bays[i].plugged=true; bays[i].car.userData.docked=true; bays[i].state='ready'; autoEnergize(bays[i]); return bays[i].state; },
-  energize(i){ if(i!=null && bays[i].plugged) autoEnergize(bays[i]); return i!=null? bays[i].state : 'none'; },
-  pause(i){ if(i!=null) toggleCharge(i); return i!=null? bays[i].state : 'none'; },
+  bayState(i){ const b=sim.bays[i]; return {state:b.state, batt:b.car?+b.car.userData.battery.toFixed(3):null, kwh:+(b.chargeKwh||0).toFixed(3), pat:b.car?+((performance.now()-b.car.userData.arrived)/1000).toFixed(1):null}; },
+  grab(i){ if(sim.bays[i].plugged) return 'plugged'; if(sim.grabbedBay&&sim.grabbedBay!==sim.bays[i]) return 'busy'; sim.grabbedBay=sim.bays[i]; sim.docked=false; return 'grabbed'; },
+  dock(i){ if(!sim.bays[i].car) return 'nocar'; sim.docked=false; sim.grabbedBay=null; sim.bays[i].plugged=true; sim.bays[i].car.userData.docked=true; sim.bays[i].state='ready'; autoEnergize(sim.bays[i]); return sim.bays[i].state; },
+  energize(i){ if(i!=null && sim.bays[i].plugged) autoEnergize(sim.bays[i]); return i!=null? sim.bays[i].state : 'none'; },
+  pause(i){ if(i!=null) toggleCharge(i); return i!=null? sim.bays[i].state : 'none'; },
   econ(){ return {revenue:+sim.revenue.toFixed(2), served: sim.served, price:+sim.spotPrice.toFixed(4)}; },
-  loadKw(){ let t=0; for(const b of bays) if(b.state==='charging') t+=b.kw; return t; },
+  loadKw(){ let t=0; for(const b of sim.bays) if(b.state==='charging') t+=b.kw; return t; },
   money(){ return {cash:+sim.cash.toFixed(2), day: sim.day, dayRev:+sim.dayRev.toFixed(2), dayCost:+sim.dayCost.toFixed(2), bufferKwh:+sim.bufferKwh.toFixed(2), bufferOwned: sim.bufferOwned}; },
   hourStats(){ return {served:sim.hourStats, arrivals:sim.hourArr, kicks:sim.kickedHourly, arrivedTotal: sim.arrivedTotal}; },
   setMarkup(v){ sim.sellMarkup=THREE.MathUtils.clamp(v, sim.MARKUP_MIN, sim.MARKUP_MAX); return {markup:sim.sellMarkup, sell:+sellPrice().toFixed(4), demand:+demandFactor().toFixed(3)}; },
@@ -1319,16 +1319,16 @@ window.__GAME = {
   goalsState(){ return {goals: sim.goals, dayStats: sim.dayStats, streak: sim.streak}; },
   completeGoal(id){ const g=sim.goals.find(x=>x.id===id); if(g&&!g.done){ sim.dayStats[g.key]=g.target; bumpGoal(g.key,0);} return 'ok'; },
   techopen(){ toggleTechMenu(true); return 'ok'; },
-  tailGlow(i){ const car=bays[i]&&bays[i].car; if(!car) return null; let mx=0; car.traverse(o=>{ if(o.isMesh&&o.material&&/tail/i.test(o.material.name||'')) mx=Math.max(mx,o.material.emissiveIntensity); }); return +mx.toFixed(2); },
-  finishArr(i){ const b=bays[i]; if(b.state==='arriving'&&b.car){ b.car.position.z=b.driveTo; b.car.rotation.y=Math.PI+(b.x-b.car.position.x)*0.035; b.state='parked'; b.car.userData.arrived=performance.now(); } return b.state; },
-  kickBay(i){ const b=bays[i]; if(b.car&&b.state!=='departing'){ b.state='departing'; b.plugged=false; } return b.state; },
-  wiperCount(i){ const car=bays[i]&&bays[i].car; if(!car) return -1; let n=0; car.traverse(o=>{ if(o.name==='WiperArm') n++; }); return n; },
-  wiperTips(i){ const car=bays[i]&&bays[i].car; if(!car) return null; car.updateMatrixWorld(true); const out=[]; car.traverse(o=>{ if(/^WiperArm/.test(o.name||'')){ const m=o.matrixWorld; out.push([+m.elements[12].toFixed(2),+m.elements[13].toFixed(2),+m.elements[14].toFixed(2)]); } }); return out; },
-  sweepCount(i){ const car=bays[i]&&bays[i].car; if(!car) return -1; let n=0; car.traverse(o=>{ if(o.name==='WipSweep') n++; }); return n; },
-  probeCar(i){ const car=bays[i]&&bays[i].car; if(!car) return null; const out={yaw:+car.rotation.y.toFixed(2), pos:car.position.toArray().map(v=>+v.toFixed(2))}; car.updateMatrixWorld(true);
+  tailGlow(i){ const car=sim.bays[i]&&sim.bays[i].car; if(!car) return null; let mx=0; car.traverse(o=>{ if(o.isMesh&&o.material&&/tail/i.test(o.material.name||'')) mx=Math.max(mx,o.material.emissiveIntensity); }); return +mx.toFixed(2); },
+  finishArr(i){ const b=sim.bays[i]; if(b.state==='arriving'&&b.car){ b.car.position.z=b.driveTo; b.car.rotation.y=Math.PI+(b.x-b.car.position.x)*0.035; b.state='parked'; b.car.userData.arrived=performance.now(); } return b.state; },
+  kickBay(i){ const b=sim.bays[i]; if(b.car&&b.state!=='departing'){ b.state='departing'; b.plugged=false; } return b.state; },
+  wiperCount(i){ const car=sim.bays[i]&&sim.bays[i].car; if(!car) return -1; let n=0; car.traverse(o=>{ if(o.name==='WiperArm') n++; }); return n; },
+  wiperTips(i){ const car=sim.bays[i]&&sim.bays[i].car; if(!car) return null; car.updateMatrixWorld(true); const out=[]; car.traverse(o=>{ if(/^WiperArm/.test(o.name||'')){ const m=o.matrixWorld; out.push([+m.elements[12].toFixed(2),+m.elements[13].toFixed(2),+m.elements[14].toFixed(2)]); } }); return out; },
+  sweepCount(i){ const car=sim.bays[i]&&sim.bays[i].car; if(!car) return -1; let n=0; car.traverse(o=>{ if(o.name==='WipSweep') n++; }); return n; },
+  probeCar(i){ const car=sim.bays[i]&&sim.bays[i].car; if(!car) return null; const out={yaw:+car.rotation.y.toFixed(2), pos:car.position.toArray().map(v=>+v.toFixed(2))}; car.updateMatrixWorld(true);
     const named={}; car.traverse(o=>{ if(o.isMesh && /glass|head|tail|windshield/i.test(o.name||'')){ const bb=new THREE.Box3().setFromObject(o); if(!named[o.name]) named[o.name]={min:bb.min.toArray().map(v=>+v.toFixed(2)),max:bb.max.toArray().map(v=>+v.toFixed(2))}; } }); out.parts=named; return out; },
-  clearBay(i){ const b=bays[i]; if(b.car){ scene.remove(b.car); b.car=null; } b.state='empty'; b.plugged=false; return 'ok'; },
-  spokeInfo(i){ const car=bays[i]&&bays[i].car; if(!car) return {e:'nocar'}; const out=[]; car.updateMatrixWorld(true); car.traverse(o=>{ if(o.isMesh && /^Spoke[0-9]+|Spoke_[0-9]+/.test(o.name) && out.length<8){ const wp=new THREE.Vector3(); o.getWorldPosition(wp); out.push({n:o.name, l:[+o.position.x.toFixed(2),+o.position.y.toFixed(2),+o.position.z.toFixed(2)], w:[+wp.x.toFixed(2),+wp.y.toFixed(2),+wp.z.toFixed(2)]}); } }); return {yaw:car.rotation.y, pos:car.position.toArray().map(v=>+v.toFixed(2)), wheels:out}; },
+  clearBay(i){ const b=sim.bays[i]; if(b.car){ scene.remove(b.car); b.car=null; } b.state='empty'; b.plugged=false; return 'ok'; },
+  spokeInfo(i){ const car=sim.bays[i]&&sim.bays[i].car; if(!car) return {e:'nocar'}; const out=[]; car.updateMatrixWorld(true); car.traverse(o=>{ if(o.isMesh && /^Spoke[0-9]+|Spoke_[0-9]+/.test(o.name) && out.length<8){ const wp=new THREE.Vector3(); o.getWorldPosition(wp); out.push({n:o.name, l:[+o.position.x.toFixed(2),+o.position.y.toFixed(2),+o.position.z.toFixed(2)], w:[+wp.x.toFixed(2),+wp.y.toFixed(2),+wp.z.toFixed(2)]}); } }); return {yaw:car.rotation.y, pos:car.position.toArray().map(v=>+v.toFixed(2)), wheels:out}; },
   audio(){ return { active: !!(window.__SFXREF && window.__SFXREF.ctx), muted: SFX.muted }; },
 };
 
@@ -1354,10 +1354,10 @@ const COACH = (function(){
     if(!startPos) startPos=p.clone();
     if(p.distanceTo(startPos)>1.2) mark(0);
     // grab/dock inferred from persistent bay state (plug stays plugged after release)
-    const anyPlugged = bays.some(b=>b.plugged);
+    const anyPlugged = sim.bays.some(b=>b.plugged);
     if(sim.grabbedBay || anyPlugged) mark(1);
     if(anyPlugged) mark(2);
-    if(bays.some(b=>b.state==='charging')) mark(3);
+    if(sim.bays.some(b=>b.state==='charging')) mark(3);
     if(sim.served>0){ mark(4); setTimeout(hide, 2500); }
   }
   function hide(){ el.style.display='none'; active=false; document.body.classList.remove('coaching'); localStorage.setItem(KEY,'1'); }
