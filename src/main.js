@@ -361,7 +361,7 @@ const ripples=new THREE.Mesh(new THREE.PlaneGeometry(46,34), new THREE.MeshBasic
 ripples.rotation.x=-Math.PI/2; ripples.position.set(0,0.006,1.5); ripples.renderOrder=2; scene.add(ripples);
 
 const mirror = new Reflector(new THREE.PlaneGeometry(46,34), {
-  clipBias: 0.004, textureWidth: 1024, textureHeight: 1024, color: 0x4a4239
+  clipBias: 0.004, textureWidth: (navigator.hardwareConcurrency>6?2048:1024), textureHeight: (navigator.hardwareConcurrency>6?2048:1024), color: 0x4a4239
 });
 mirror.rotation.x=-Math.PI/2; mirror.position.set(0,-0.002,1.5); mirror.renderOrder=0;
 mirror.visible=true; scene.add(mirror);
@@ -853,6 +853,8 @@ function spinWheels(car, dt){
   const dz = car.position.z - (ud.prevZ!==undefined?ud.prevZ:car.position.z); ud.prevZ=car.position.z;
   if(Math.abs(dz)<1e-4) return;
   for(const g of ud.wheelPivots) g.rotation.x += dz/g.userData.r;   // forward = -Z; top of wheel must travel -Z
+  ud.speed = Math.abs(dz/Math.max(dt,1e-3));
+  SFX.tire(); SFX.setTire(Math.min(1, ud.speed/9));
 }
 function steerTilt(car, amt){
   const ud=car.userData; if(!ud.steerMeshes) return;
@@ -861,6 +863,61 @@ function steerTilt(car, amt){
 function brakeGlow(car, k){ // k 0..1 red brake / reverse intensity
   const ud=car.userData; if(!ud.tailMeshes) return;
   for(const t of ud.tailMeshes){ t.o.material.emissiveIntensity = t.base + 2.4*k; }
+}
+// ---- wet-weather car rig: beading clearcoat + wipers ----
+function buildWetRig(car){
+  if(car.userData.wetRig) return;
+  const paints=[]; car.traverse(o=>{ if(o.isMesh&&o.material&&/paint/i.test(o.material.name||'')){
+    if(o.material.clearcoat===undefined){
+      const om=o.material, nm=new THREE.MeshPhysicalMaterial({ color:om.color.clone(), map:om.map||null, roughnessMap:om.roughnessMap||null, normalMap:om.normalMap||null, roughness:om.roughness, metalness:om.metalness, envMapIntensity:om.envMapIntensity, emissive:om.emissive.clone(), emissiveIntensity:om.emissiveIntensity });
+      nm.name=om.name; nm.clearcoat=0.35; nm.clearcoatRoughness=0.25; o.material=nm;
+    }
+    paints.push({o:o, base:{cc:o.material.clearcoat, ccr:o.material.clearcoatRoughness}});
+  } });
+  // wiper pivot at windshield base (front is -Z world at spawn yaw PI)
+  const bb=new THREE.Box3().setFromObject(car);
+  const wiperMat=new THREE.MeshStandardMaterial({color:0x0a0c10, roughness:0.6, metalness:0.3});
+  const pivots=[];
+  for(const side of [-1,1]){
+    const p=new THREE.Group();
+    // world-space anchor: windshield base = front of car (world -Z at spawn yaw), then convert into car local
+    const wp=new THREE.Vector3(car.position.x + side*0.32, bb.max.y-0.42, bb.min.z+0.30);
+    p.position.copy(car.worldToLocal(wp));
+    // car-local Y = up => pivot.rotation.y sweeps around vertical (clean wiper arc)
+    const tilt=new THREE.Group(); tilt.rotation.x=-1.15; p.add(tilt);   // raise arm along raked glass (local +Z→+Y-ish)
+    const arm=new THREE.Mesh(new THREE.BoxGeometry(0.02,0.02,0.42), wiperMat);
+    arm.geometry.translate(0,0,0.21);
+    const blade=new THREE.Mesh(new THREE.BoxGeometry(0.012,0.055,0.40), wiperMat);
+    blade.position.set(0,0,0.44);
+    tilt.add(arm); tilt.add(blade); car.add(p);
+    pivots.push({p, side, t:Math.random()*6});
+  }
+  car.userData.wetRig={paints, pivots, lastState:null};
+}
+function wetUpdate(car, dt, raining, tNow){
+  const ud=car.userData; if(!ud.wetRig) buildWetRig(car);
+  const wr=ud.wetRig;
+  // beading: oscillate clearcoat roughness so water sheets glint at dusk
+  for(const pm of wr.paints){
+    const m=pm.o.material;
+    if(raining){ m.clearcoat=1.0; m.clearcoatRoughness=0.06+0.05*Math.sin(tNow*0.0016+wr.paints.indexOf(pm)); }
+    else { m.clearcoat=pm.base.cc; m.clearcoatRoughness=pm.base.ccr; }
+    m.needsUpdate=false;
+  }
+  // wipers sweep only when raining
+  for(const w of wr.pivots){
+    if(raining){
+      const prev=w.t; w.t+=dt*2.4;
+      w.p.rotation.y = Math.sin(w.t)*(w.side<0? 0.9 : 0.85);
+      w.p.visible = true;
+      // squeak at sweep reversals (sin crosses extremum)
+      if(Math.sin(prev)>0.995 || Math.sin(prev)<-0.995) wr.squeakT=(wr.squeakT||0)+1;
+    } else {
+      w.p.visible=true; w.p.rotation.y=0;
+    }
+  }
+  if(raining && wr.squeakT && performance.now()-(wr.lastSqueak||0)>1400){ wr.lastSqueak=performance.now(); SFX.wiperSqueak(); }
+  wr.lastState=raining;
 }
 function spawnCar(bay, instant=false, vip=false, seg=null){
   seg = seg || pickSegment();
@@ -1092,7 +1149,23 @@ const SFX = (function(){
     const o=ctx.createOscillator(); o.type='triangle'; o.frequency.setValueAtTime(392,t); o.frequency.setValueAtTime(330,t+0.16);
     const g=ctx.createGain(); g.gain.setValueAtTime(0.12,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.5);
     o.connect(g); g.connect(master); o.start(t); o.stop(t+0.55); }
-  const api={ resume, setRain:setRain2, setCharge, click, latch, chime, cash, engine, city, rainLFO, departHorn, toggleMute, get muted(){return muted;} };
+  // ---- tire hum: filtered noise that swells with car speed ----
+  let tireGain=null, tireSrc=null;
+  function tire(){ if(!ctx||muted) return; if(tireGain) return;
+    const len=ctx.sampleRate*2, buf=ctx.createBuffer(1,len,ctx.sampleRate), d=buf.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=(Math.random()*2-1);
+    tireSrc=ctx.createBufferSource(); tireSrc.buffer=buf; tireSrc.loop=true;
+    const bp=ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=420; bp.Q.value=1.4;
+    tireGain=ctx.createGain(); tireGain.gain.value=0.0001;
+    tireSrc.connect(bp); bp.connect(tireGain); tireGain.connect(master); tireSrc.start(); }
+  function setTire(v){ if(!ctx||!tireGain) return; tireGain.gain.setTargetAtTime(Math.min(0.09,v*0.09), ctx.currentTime, 0.25); }
+  // ---- wiper squeak: short high-band pass chirp ----
+  function wiperSqueak(){ if(!ctx||muted) return; const t=ctx.currentTime;
+    const o=ctx.createOscillator(); o.type='sine'; o.frequency.setValueAtTime(1150,t); o.frequency.exponentialRampToValueAtTime(700,t+0.22);
+    const f=ctx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=1100; f.Q.value=6;
+    const g=ctx.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(0.018,t+0.05); g.gain.exponentialRampToValueAtTime(0.0005,t+0.25);
+    o.connect(f); f.connect(g); g.connect(master); o.start(t); o.stop(t+0.3); }
+  const api={ resume, setRain:setRain2, setCharge, click, latch, chime, cash, engine, city, rainLFO, departHorn, tire, setTire, wiperSqueak, toggleMute, get muted(){return muted;} };
   window.__SFXREF = api;
   return api;
 })();
@@ -1563,6 +1636,9 @@ function animate(){
   if(now<brownUntil) wx += ' + Brownout';
   wxEl.textContent = wx;
   SFX.setRain(raining);
+  let maxSpd=0;
+  for(const b of bays){ if(b.car){ wetUpdate(b.car, dt, raining, performance.now()); maxSpd=Math.max(maxSpd, b.car.userData.speed||0); b.car.userData.speed=0; } }
+  SFX.setTire(Math.min(1, maxSpd/9));
 
   // bay logic
   let totalKw=0;
