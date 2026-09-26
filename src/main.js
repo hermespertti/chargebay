@@ -874,8 +874,41 @@ function buildWetRig(car){
     }
     paints.push({o:o, base:{cc:o.material.clearcoat, ccr:o.material.clearcoatRoughness}});
   } });
-  // wiper arms omitted: procedural cars lack a reliable cowl anchor; beads+hum carry the rain read instead
+  // GLB truth (probe + source): car faces world -Z at yaw PI; tail bar at world -Z extreme... measured glass bbox is authoritative at runtime
+  let gBB=null, hObj=null;
+  car.updateMatrixWorld(true);
+  car.traverse(o=>{ if(!o.isMesh) return;
+    if(/glass/i.test(o.name||'') && !gBB) gBB=new THREE.Box3().setFromObject(o);
+    if(/HeadL|Headlight/i.test(o.name||'')) hObj=o;
+  });
   const pivots=[];
+  if(gBB && hObj){
+    const gc=new THREE.Vector3(); gBB.getCenter(gc);
+    const hp=new THREE.Vector3(); hObj.getWorldPosition(hp);
+    const front = Math.abs(hp.z-gc.z) > Math.abs(hp.x-gc.x)
+      ? new THREE.Vector3(0,0,Math.sign(hp.z-gc.z))
+      : new THREE.Vector3(Math.sign(hp.x-gc.x),0,0);      // axis chosen from actual headlight offset
+    const spanF = front.z!==0 ? (gBB.max.z-gBB.min.z) : (gBB.max.x-gBB.min.x);
+    const wiperMat=new THREE.MeshStandardMaterial({color:0x6a7482, roughness:0.5, metalness:0.4, emissive:0x22262c, emissiveIntensity:1.4});
+    for(const side of [-1,1]){
+      const p=new THREE.Group();
+      const lat = front.z!==0 ? new THREE.Vector3(side*0.30,0,0) : new THREE.Vector3(0,0,side*0.30);
+      const anchor = gc.clone().addScaledVector(front, spanF*0.5+0.05).add(lat);
+      anchor.y = gBB.min.y+0.16;
+      p.position.copy(car.worldToLocal(anchor));
+      const tilt=new THREE.Group();
+      const wdir=new THREE.Vector3().copy(front).multiplyScalar(-0.70); wdir.y=0.71; wdir.z = front.z!==0 ? wdir.z : 0;
+      wdir.normalize();
+      const q=new THREE.Quaternion(); car.getWorldQuaternion(q);
+      tilt.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1), wdir.applyQuaternion(q.invert()));
+      const arm=new THREE.Mesh(new THREE.BoxGeometry(0.05,0.05,0.6), wiperMat); arm.name='WiperArm';
+      arm.geometry.translate(0,0,0.30);
+      const blade=new THREE.Mesh(new THREE.BoxGeometry(0.024,0.08,0.5), wiperMat); blade.name='WiperBlade';
+      blade.position.set(0,0,0.64);
+      tilt.add(arm); tilt.add(blade); p.add(tilt); car.add(p);
+      pivots.push({p, side, t:Math.random()*6, tilt});
+    }
+  }
   car.userData.wetRig={paints, pivots, lastState:null};
 }
 function wetUpdate(car, dt, raining, tNow){
@@ -892,7 +925,7 @@ function wetUpdate(car, dt, raining, tNow){
   for(const w of wr.pivots){
     if(raining){
       const prev=w.t; w.t+=dt*2.4;
-      w.p.rotation.y = Math.sin(w.t)*(w.side<0? 0.5 : 0.42);
+      w.p.rotation.y = Math.sin(w.t)*0.6;  // sweep about vertical: arm tip arcs across the glass in X/Y plane
       w.p.visible = true;
       // squeak at sweep reversals (sin crosses extremum)
       if(Math.sin(prev)>0.995 || Math.sin(prev)<-0.995) wr.squeakT=(wr.squeakT||0)+1;
@@ -1919,6 +1952,7 @@ window.__GAME = {
   tailGlow(i){ const car=bays[i]&&bays[i].car; if(!car) return null; let mx=0; car.traverse(o=>{ if(o.isMesh&&o.material&&/tail/i.test(o.material.name||'')) mx=Math.max(mx,o.material.emissiveIntensity); }); return +mx.toFixed(2); },
   finishArr(i){ const b=bays[i]; if(b.state==='arriving'&&b.car){ b.car.position.z=b.driveTo; b.car.rotation.y=Math.PI+(b.x-b.car.position.x)*0.035; b.state='parked'; b.car.userData.arrived=performance.now(); } return b.state; },
   kickBay(i){ const b=bays[i]; if(b.car&&b.state!=='departing'){ b.state='departing'; b.plugged=false; } return b.state; },
+  wiperCount(i){ const car=bays[i]&&bays[i].car; if(!car) return -1; let n=0; car.traverse(o=>{ if(o.name==='WiperArm') n++; }); return n; },
   probeCar(i){ const car=bays[i]&&bays[i].car; if(!car) return null; const out={yaw:+car.rotation.y.toFixed(2), pos:car.position.toArray().map(v=>+v.toFixed(2))}; car.updateMatrixWorld(true);
     const named={}; car.traverse(o=>{ if(o.isMesh && /glass|head|tail|windshield/i.test(o.name||'')){ const bb=new THREE.Box3().setFromObject(o); if(!named[o.name]) named[o.name]={min:bb.min.toArray().map(v=>+v.toFixed(2)),max:bb.max.toArray().map(v=>+v.toFixed(2))}; } }); out.parts=named; return out; },
   clearBay(i){ const b=bays[i]; if(b.car){ scene.remove(b.car); b.car=null; } b.state='empty'; b.plugged=false; return 'ok'; },
