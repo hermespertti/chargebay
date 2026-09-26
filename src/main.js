@@ -832,6 +832,36 @@ function bayPort(b){
 }
 
 // spawn a car at a bay with random paint & battery
+function buildWheelRig(car){
+  if(car.userData.wheelPivots) return;
+  const groups={};
+  car.traverse(o=>{ if(!o.isMesh) return; const m=/^(?:Disc|Spoke|Lip|Hub|Tire|WW)[_]?(\d+)/.exec(o.name); if(m){ const k=m[1]; (groups[k]=groups[k]||[]).push(o); } });
+  const pivots=[];
+  for(const k in groups){
+    const ms=groups[k];
+    const c=new THREE.Vector3(); ms.forEach(o=>c.add(o.position)); c.multiplyScalar(1/ms.length);
+    const par=ms[0].parent; const g=new THREE.Group(); g.position.copy(c); g.userData.r=0.40; par.add(g);
+    for(const o of ms) g.attach(o);
+    pivots.push(g);
+  }
+  const steer=[]; car.traverse(o=>{ if(o.isMesh && /^Wheel[0-9]/.test(o.name)) steer.push({o, base:o.rotation.y}); });
+  const tails=[]; car.traverse(o=>{ if(o.isMesh && o.material && /tail/i.test(o.material.name||'')) tails.push({o, base:o.material.emissiveIntensity||1}); });
+  car.userData.wheelPivots=pivots; car.userData.steerMeshes=steer; car.userData.tailMeshes=tails; car.userData.prevZ=car.position.z;
+}
+function spinWheels(car, dt){
+  const ud=car.userData; if(!ud.wheelPivots) buildWheelRig(car);
+  const dz = car.position.z - (ud.prevZ!==undefined?ud.prevZ:car.position.z); ud.prevZ=car.position.z;
+  if(Math.abs(dz)<1e-4) return;
+  for(const g of ud.wheelPivots) g.rotation.x -= dz/g.userData.r;   // local X = axle (cars face -Z at yaw PI)
+}
+function steerTilt(car, amt){
+  const ud=car.userData; if(!ud.steerMeshes) return;
+  for(const s of ud.steerMeshes) s.o.rotation.y = s.base + amt;
+}
+function brakeGlow(car, k){ // k 0..1 red brake / reverse intensity
+  const ud=car.userData; if(!ud.tailMeshes) return;
+  for(const t of ud.tailMeshes){ t.o.material.emissiveIntensity = t.base + 2.4*k; }
+}
 function spawnCar(bay, instant=false, vip=false, seg=null){
   seg = seg || pickSegment();
   const pool = (segProto[seg.id] && segProto[seg.id].length) ? segProto[seg.id] : origProtos;
@@ -1541,6 +1571,8 @@ function animate(){
       b.car.position.z = THREE.MathUtils.lerp(b.car.position.z, b.driveTo, dt*1.6);
       // settle straight into the bay as it approaches
       const near=THREE.MathUtils.clamp(1-(b.car.position.z-b.driveTo)/9,0,1);
+      spinWheels(b.car, dt); steerTilt(b.car, Math.sin(performance.now()*0.0012)*0.12);
+      brakeGlow(b.car, near*near);
       b.car.rotation.y = Math.PI + (b.x-b.car.position.x)*0.035*(1-near);
       if(b.tailRefl) b.tailRefl.position.z = b.car.position.z+1.4;
       if(b.headRefl) b.headRefl.position.z = b.car.position.z-1.2;
@@ -1596,6 +1628,7 @@ function animate(){
         b.car.rotation.y = lerpAng(dep.yaw0, targetYaw, k);
         const rev=new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), b.car.rotation.y); // rear = local -Z? (front faces -Z at spawn => rear dir is +Z world via this)
         b.car.position.addScaledVector(rev, dep.v*dt);
+        spinWheels(b.car, dt); steerTilt(b.car, -targetYaw/2*Math.min(1,dep.t/2)); brakeGlow(b.car, 1);
         if(b.cshadow){ b.cshadow.position.set(b.car.position.x,0.018,b.car.position.z); b.cshadow.rotation.y=b.car.rotation.y; }
         if((b.car.position.z>7.2 && Math.abs(lerpDelta(b.car.rotation.y,targetYaw))<0.15) || dep.t>5.5){ dep.stage=1; dep.v=0; }
       } else if(dep.stage===1){
@@ -1604,12 +1637,14 @@ function animate(){
         b.car.rotation.y = lerpAng(b.car.rotation.y, targetYaw, Math.min(1,dt*4));
         const rev2=new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), b.car.rotation.y);
         b.car.position.addScaledVector(rev2, 0.8*dt);
+        spinWheels(b.car, dt); steerTilt(b.car, -targetYaw/3); brakeGlow(b.car, 0.4);
         if(b.cshadow){ b.cshadow.position.set(b.car.position.x,0.018,b.car.position.z); b.cshadow.rotation.y=b.car.rotation.y; }
         if(Math.abs(lerpDelta(b.car.rotation.y,targetYaw))<0.05){ dep.stage=2; }
       } else {
         // cruise off along the road
         dep.v=Math.min(9, dep.v+dt*5);
         b.car.position.x += dep.dir*dep.v*dt;
+        spinWheels(b.car, dt); steerTilt(b.car, 0); brakeGlow(b.car, 0);
         if(b.cshadow){ b.cshadow.position.set(b.car.position.x,0.018,b.car.position.z); }
       }
       if(b.tailRefl) b.tailRefl.visible=false;
@@ -1821,6 +1856,11 @@ window.__GAME = {
   goalsState(){ return {goals, dayStats, streak}; },
   completeGoal(id){ const g=goals.find(x=>x.id===id); if(g&&!g.done){ dayStats[g.key]=g.target; bumpGoal(g.key,0);} return 'ok'; },
   techopen(){ toggleTechMenu(true); return 'ok'; },
+  tailGlow(i){ const car=bays[i]&&bays[i].car; if(!car) return null; let mx=0; car.traverse(o=>{ if(o.isMesh&&o.material&&/tail/i.test(o.material.name||'')) mx=Math.max(mx,o.material.emissiveIntensity); }); return +mx.toFixed(2); },
+  finishArr(i){ const b=bays[i]; if(b.state==='arriving'&&b.car){ b.car.position.z=b.driveTo; b.car.rotation.y=Math.PI+(b.x-b.car.position.x)*0.035; b.state='parked'; b.car.userData.arrived=performance.now(); } return b.state; },
+  kickBay(i){ const b=bays[i]; if(b.car&&b.state!=='departing'){ b.state='departing'; b.plugged=false; } return b.state; },
+  clearBay(i){ const b=bays[i]; if(b.car){ scene.remove(b.car); b.car=null; } b.state='empty'; b.plugged=false; return 'ok'; },
+  spokeInfo(i){ const car=bays[i]&&bays[i].car; if(!car) return {e:'nocar'}; const out=[]; car.updateMatrixWorld(true); car.traverse(o=>{ if(o.isMesh && /^Spoke[0-9]+|Spoke_[0-9]+/.test(o.name) && out.length<8){ const wp=new THREE.Vector3(); o.getWorldPosition(wp); out.push({n:o.name, l:[+o.position.x.toFixed(2),+o.position.y.toFixed(2),+o.position.z.toFixed(2)], w:[+wp.x.toFixed(2),+wp.y.toFixed(2),+wp.z.toFixed(2)]}); } }); return {yaw:car.rotation.y, pos:car.position.toArray().map(v=>+v.toFixed(2)), wheels:out}; },
   audio(){ return { active: !!(window.__SFXREF && window.__SFXREF.ctx), muted: SFX.muted }; },
 };
 

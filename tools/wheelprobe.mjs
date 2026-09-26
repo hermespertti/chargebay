@@ -1,0 +1,16 @@
+import puppeteer from 'puppeteer-core';
+import http from 'http';
+import fs from 'fs';
+import path from 'path';
+const MIME={'.html':'text/html','.js':'text/javascript','.glb':'model/gltf-binary','.bin':'application/octet-stream','.hdr':'image/vnd.radiance-hdr','.png':'image/png'};
+const srv=http.createServer((q,r)=>{let p=q.url.split('?')[0]; if(p==='/')p='/index.html'; fs.readFile('/home/lex/chargebay'+p,(e,d)=>{if(e){r.writeHead(404);r.end();return;} r.writeHead(200,{'Content-Type':MIME[path.extname(p)]||'application/octet-stream'}); r.end(d);});});
+await new Promise(r=>srv.listen(8143,r));
+const b=await puppeteer.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox','--use-gl=angle','--use-angle=vulkan','--enable-unsafe-swiftshader','--disable-dev-shm-usage'],defaultViewport:{width:800,height:600}});
+const pg=await b.newPage();
+await pg.goto('http://127.0.0.1:8143/',{waitUntil:'load',timeout:120000});
+await pg.waitForFunction('window.__GAME&&window.__GAME.ready()',{timeout:180000});
+const out=await pg.evaluate(`(()=>{const b=window.__GAME.bays[0]; if(!b.car) return {e:'nocar'};
+  const v={}; b.car.traverse(o=>{ if(o.isObject3D && /^Disc/.test(o.name) && !v[o.name]) v[o.name]=[+o.position.x.toFixed(2),+o.position.y.toFixed(2),+o.position.z.toFixed(2)]; });
+  return { v, yaw:b.car.rotation.y, pos:[+b.car.position.x.toFixed(2),0,+b.car.position.z.toFixed(2)] }; })()`);
+console.log(JSON.stringify(out));
+await b.close(); srv.close(); process.exit(0);
