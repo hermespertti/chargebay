@@ -874,8 +874,19 @@ function buildWetRig(car){
     }
     paints.push({o:o, base:{cc:o.material.clearcoat, ccr:o.material.clearcoatRoughness}});
   } });
-  // wipers: deferred to Blender-authored geometry (single continuous Glass loft gives no reliable windshield cowl at runtime; see skill note)
+  // GLB-authored wiper pairs (WiperArm + WiperBlade[.001]) — wrap each pair into a sweep pivot at the arm base
   const pivots=[];
+  const axes=new Set(); car.traverse(o=>{ if(/^WiperArm/.test(o.name||'')) axes.add(o.name); });
+  for(const an of axes){
+    const arm=car.getObjectByName(an); if(!arm) continue;
+    const blade=car.getObjectByName(an.replace('WiperArm','WiperBlade'));
+    const parent=arm.parent||car;
+    const pivot=new THREE.Group(); pivot.name='WipSweep';
+    pivot.position.copy(arm.position); parent.add(pivot);
+    pivot.attach(arm); if(blade) pivot.attach(blade);
+    // sweep axis = windshield outward normal in car-local glTF space (glass tangent (-0.72,+0.69,0) → normal (0.69,0.72,0))
+    pivots.push({p:pivot, axis:new THREE.Vector3(0.69,0.72,0).normalize(), side:arm.position.z>=0?1:-1, t:Math.random()*6, prev:0});
+  }
   car.userData.wetRig={paints, pivots, lastState:null};
 }
 function wetUpdate(car, dt, raining, tNow){
@@ -892,7 +903,7 @@ function wetUpdate(car, dt, raining, tNow){
   for(const w of wr.pivots){
     if(raining){
       const prev=w.t; w.t+=dt*2.4;
-      w.p.rotation.y = Math.sin(w.t)*0.6;  // sweep about vertical: arm tip arcs across the glass in X/Y plane
+      w.p.quaternion.setFromAxisAngle(w.axis, Math.sin(w.t)*0.55);  // fan sweep around glass normal
       w.p.visible = true;
       // squeak at sweep reversals (sin crosses extremum)
       if(Math.sin(prev)>0.995 || Math.sin(prev)<-0.995) wr.squeakT=(wr.squeakT||0)+1;
@@ -1920,6 +1931,8 @@ window.__GAME = {
   finishArr(i){ const b=bays[i]; if(b.state==='arriving'&&b.car){ b.car.position.z=b.driveTo; b.car.rotation.y=Math.PI+(b.x-b.car.position.x)*0.035; b.state='parked'; b.car.userData.arrived=performance.now(); } return b.state; },
   kickBay(i){ const b=bays[i]; if(b.car&&b.state!=='departing'){ b.state='departing'; b.plugged=false; } return b.state; },
   wiperCount(i){ const car=bays[i]&&bays[i].car; if(!car) return -1; let n=0; car.traverse(o=>{ if(o.name==='WiperArm') n++; }); return n; },
+  wiperTips(i){ const car=bays[i]&&bays[i].car; if(!car) return null; car.updateMatrixWorld(true); const out=[]; car.traverse(o=>{ if(/^WiperArm/.test(o.name||'')){ const m=o.matrixWorld; out.push([+m.elements[12].toFixed(2),+m.elements[13].toFixed(2),+m.elements[14].toFixed(2)]); } }); return out; },
+  sweepCount(i){ const car=bays[i]&&bays[i].car; if(!car) return -1; let n=0; car.traverse(o=>{ if(o.name==='WipSweep') n++; }); return n; },
   probeCar(i){ const car=bays[i]&&bays[i].car; if(!car) return null; const out={yaw:+car.rotation.y.toFixed(2), pos:car.position.toArray().map(v=>+v.toFixed(2))}; car.updateMatrixWorld(true);
     const named={}; car.traverse(o=>{ if(o.isMesh && /glass|head|tail|windshield/i.test(o.name||'')){ const bb=new THREE.Box3().setFromObject(o); if(!named[o.name]) named[o.name]={min:bb.min.toArray().map(v=>+v.toFixed(2)),max:bb.max.toArray().map(v=>+v.toFixed(2))}; } }); out.parts=named; return out; },
   clearBay(i){ const b=bays[i]; if(b.car){ scene.remove(b.car); b.car=null; } b.state='empty'; b.plugged=false; return 'ok'; },

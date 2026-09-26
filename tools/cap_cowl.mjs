@@ -1,0 +1,20 @@
+import puppeteer from 'puppeteer-core';
+import http from 'http';
+import fs from 'fs';
+import path from 'path';
+const MIME={'.html':'text/html','.js':'text/javascript','.glb':'model/gltf-binary','.bin':'application/octet-stream','.hdr':'image/vnd.radiance-hdr','.png':'image/png'};
+const srv=http.createServer((q,r)=>{let p=q.url.split('?')[0];if(p==='/')p='/index.html';fs.readFile('/home/lex/chargebay'+p,(e,d)=>{if(e){r.writeHead(404);r.end();return;}r.writeHead(200,{'Content-Type':MIME[path.extname(p)]||'application/octet-stream'});r.end(d);});});
+await new Promise(r=>srv.listen(8164,r));
+const b=await puppeteer.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox','--use-gl=angle','--use-angle=vulkan','--enable-unsafe-swiftshader','--disable-dev-shm-usage'],defaultViewport:{width:1280,height:720}});
+const pg=await b.newPage();
+pg.on('pageerror',e=>console.log('ERR:',e.message.slice(0,140)));
+await pg.goto('http://127.0.0.1:8164/',{waitUntil:'load',timeout:120000});
+await pg.waitForFunction('window.__GAME&&window.__GAME.ready()',{timeout:180000});
+await pg.evaluate("document.getElementById('start').style.display='none'; window.__GAME.weather(1); window.__GAME.clearBay(0); window.__GAME.forceArr(0);");
+await new Promise(r=>setTimeout(r,3200));
+// tight cowl shot: nose side +Z, 1.6m out, aim at windshield band
+await pg.evaluate("(()=>{const g=window.__GAME; const p=g.carPos(0); if(!p) return; g.pose(p.x+1.1, 1.0, p.z+2.0, 0, 0); g.lookAt(p.x, 0.75, p.z, 2.2);})()");
+await new Promise(r=>setTimeout(r,2200));
+await pg.screenshot({path:'progress/artifacts/wiper_close.png'});
+console.log('shot ok');
+await b.close(); srv.close(); process.exit(0);

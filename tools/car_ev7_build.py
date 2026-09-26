@@ -104,9 +104,51 @@ for ri in range(len(grings)-1):
 bm.faces.new(list(reversed(grings[0]))); bm.faces.new(grings[-1])
 bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
 bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=1e-5)
-me=bpy.data.meshes.new('Glass'); bm.to_mesh(me); bm.free()
-gl=bpy.data.objects.new('Glass', me); bpy.context.collection.objects.link(gl)
+# split greenhouse into Windshield (front, x>=0.10) and Glass (rest) by FACE CENTER — no straddling faces dropped.
+thr=GST[2][0]
+def submesh(name, front):
+    b2=bmesh.new(); vmap={}
+    fmap={}
+    for f in bm.faces:
+        cx=sum(v.co.x for v in f.verts)/len(f.verts)
+        if ((cx>=thr) if front else (cx<thr)):
+            nv=[]
+            for v in f.verts:
+                if v not in vmap: vmap[v]=b2.verts.new(v.co)
+                nv.append(vmap[v])
+            try: b2.faces.new(nv)
+            except ValueError: pass
+    bmesh.ops.remove_doubles(b2, verts=b2.verts[:], dist=1e-5)
+    m=bpy.data.meshes.new(name); b2.to_mesh(m); b2.free(); return m
+meW=submesh('Windshield', True)
+glw=bpy.data.objects.new('Windshield', meW); bpy.context.collection.objects.link(glw)
+glw.data.materials.append(mGlass)
+meS=submesh('Glass', False)
+gl=bpy.data.objects.new('Glass', meS); bpy.context.collection.objects.link(gl)
 gl.data.materials.append(mGlass)
+# cowl trim: thin dark panel along windshield base (wiper anchor line)
+bpy.ops.mesh.primitive_cube_add(size=2)
+cowl=bpy.context.object; cowl.name='Cowl'
+cowl.scale=(0.05,0.82,0.015)          # thin trim strip across the car at windshield base
+cowl.location=(GST[0][0]+0.02, 0.0, GST[0][1]-0.34+0.01)  # windshield base line: x≈0.97, z≈0.53 (front station bottom edge)
+cowl.data.materials.append(mat('CowlTrim',(0.02,0.02,0.025),0.4,0.6))
+# wiper arms + pivot empties at cowl; game finds WiperPivot_* nodes and sweeps them in rain
+mw=mat('WiperMetal',(0.55,0.60,0.66),0.8,0.25, emis=(0.45,0.50,0.58), emis_str=0.8)   # polished + slight emissive = visible against dark glass at dusk
+import mathutils
+for side in (-1,1):
+    piv=bpy.data.objects.new("WiperPivot_"+("L" if side<0 else "R"), None)
+    bpy.context.collection.objects.link(piv)
+    piv.location=(GST[0][0]+0.01, side*0.30, GST[0][1]-0.33)
+    n=mathutils.Vector((-0.72,0.0,0.70)).normalized()   # to_track_quat('Z','Y') maps arm+Z to n in Blender space; (-x,+z)=rearward-up; glTF keeps x, maps z->y
+    piv.rotation_mode='QUATERNION'; piv.rotation_quaternion=n.to_track_quat('Z','Y')
+    bpy.ops.mesh.primitive_cube_add(size=2)
+    arm=bpy.context.object; arm.name='WiperArm'
+    arm.scale=(0.022,0.022,0.26); arm.location=(0,0,0.26)   # ~4.4cm visible section at game scale
+    arm.parent=piv; arm.data.materials.append(mw)
+    bpy.ops.mesh.primitive_cube_add(size=2)
+    bl=bpy.context.object; bl.name='WiperBlade'
+    bl.scale=(0.014,0.045,0.24); bl.location=(0.02,0,0.54)
+    bl.parent=piv; bl.data.materials.append(mw)
 
 # dark interior cabin fills the greenhouse so glass reads as glazing, not red paint
 bm=bmesh.new(); ir=[]
