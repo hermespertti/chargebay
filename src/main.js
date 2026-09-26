@@ -18,6 +18,7 @@ import { createAtmosphere } from './atmosphere.js';
 import { createWorld } from './world.js';
 import { sim, MARKUP_MIN, MARKUP_MAX, BUFFER_COST, BUFFER_CAP, BUFFER_RATE_KWH_MIN, SOLAR_CAP_KW, SAVE_KEY, sellPrice, demandFactor, repMult } from './sim.js';
 import { buildWheelRig, spinWheels, steerTilt, brakeGlow, buildWetRig, wetUpdate } from './vehicles.js';
+import { createWeather } from './weather.js';
 
 // ---------------- core ----------------
 const app = document.getElementById('app');
@@ -255,13 +256,13 @@ function tintPaint(root, color){
 // ---------------- quality settings ----------------
 function qApply(mode){
   Q.mode = mode; localStorage.setItem(QKEY, mode);
-  if(mode==='high'){ Q.glare=1.0; Q.envMax=2.6; renderer.setPixelRatio(Math.min(devicePixelRatio,1.5)); renderer.shadowMap.enabled=true; if(ssao) ssao.enabled=true; rain.count=Math.min(rainCount, 2600); mirror.visible=true; }
-  else if(mode==='med'){ Q.glare=0.75; Q.envMax=1.6; renderer.setPixelRatio(Math.min(devicePixelRatio,1)); renderer.shadowMap.enabled=true; if(ssao) ssao.enabled=false; rain.count=Math.min(rainCount, 1400); mirror.visible=true; }
-  else if(mode==='low'){ Q.glare=0.6; Q.envMax=1.2; renderer.setPixelRatio(Math.max(0.65, Math.min(devicePixelRatio,0.7))); renderer.shadowMap.enabled=false; if(ssao) ssao.enabled=false; rain.count=Math.min(rainCount, 600); mirror.visible=false; }
+  if(mode==='high'){ Q.glare=1.0; Q.envMax=2.6; renderer.setPixelRatio(Math.min(devicePixelRatio,1.5)); renderer.shadowMap.enabled=true; if(ssao) ssao.enabled=true; WEATHER.rain.count=Math.min(WEATHER.rainCount, 2600); mirror.visible=true; }
+  else if(mode==='med'){ Q.glare=0.75; Q.envMax=1.6; renderer.setPixelRatio(Math.min(devicePixelRatio,1)); renderer.shadowMap.enabled=true; if(ssao) ssao.enabled=false; WEATHER.rain.count=Math.min(WEATHER.rainCount, 1400); mirror.visible=true; }
+  else if(mode==='low'){ Q.glare=0.6; Q.envMax=1.2; renderer.setPixelRatio(Math.max(0.65, Math.min(devicePixelRatio,0.7))); renderer.shadowMap.enabled=false; if(ssao) ssao.enabled=false; WEATHER.rain.count=Math.min(WEATHER.rainCount, 600); mirror.visible=false; }
   else { // auto: scale by display width; fps governor in animate
     renderer.setPixelRatio(Math.min(devicePixelRatio, Math.max(0.65, 1200/window.innerWidth)));
     if(ssao) ssao.enabled = window.innerWidth<=1600;
-    rain.count=Math.min(rainCount, 1400); mirror.visible=true;
+    WEATHER.rain.count=Math.min(WEATHER.rainCount, 1400); mirror.visible=true;
   }
   scene.traverse(o=>{ if(o.isMesh&&o.material){ const ms=Array.isArray(o.material)?o.material:[o.material]; for(const m of ms){ if(m.isMeshStandardMaterial){ m.envMapIntensity=Math.min(m.envMapIntensity||1, Q.envMax); m.needsUpdate=true; } } } });
   applyDaylight(sim.gameClock);
@@ -280,6 +281,7 @@ function boostEnv(root, inten=2.6){
 // real foliage & street props (Poly Haven)
 const PROPS = {};
 const windSway=[];   // {o, ph, amp} — gentle canopy breeze, stronger when raining
+
 async function loadProps(){
   const defs = [
     ['shrub','assets/shrub_b.glb'],
@@ -552,14 +554,10 @@ let tEEl=null, tREl=null;
 
 function toast(msg){ toastEl.innerHTML=msg; toastEl.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>toastEl.classList.remove('show'),2200); }
 
-// ---------------- camera lens rain FX (DOM) ----------------
-let lensFx=null, lensCv=null, lensG=null, drops=[];
-function initLensFx(){
-  lensCv=document.createElement('canvas'); lensCv.width=640; lensCv.height=360;
-  lensCv.id='lensfx'; document.getElementById('app').appendChild(lensCv);
-  lensG=lensCv.getContext('2d'); lensFx=lensCv;
-  for(let i=0;i<40;i++) drops.push({x:Math.random()*640, y:Math.random()*360, r:1.5+Math.random()*3.5, v:0.2+Math.random()*0.6, trail:0});
-}
+// ---- weather system: rain streaks, ripples, lens drops, events ----
+const WEATHER = createWeather({ scene, camera, mirror, ripples, windSway,
+  asphalt, wxEl, nightK: ()=>ATMO.nightK, toast });
+
 function lensDrip(dt){
   if(!lensG) return;
   lensG.clearRect(0,0,640,360);
@@ -888,21 +886,6 @@ function contactShadow(w,d,x,z,op){
   m.rotation.order='YXZ'; m.rotation.x=-Math.PI/2; m.position.set(x,0.018,z); m.renderOrder=6; return m;
 }
 
-// ---------------- rain: instanced streaks ----------------
-const rainCount = 4000;
-const dropGeo = new THREE.PlaneGeometry(0.006, 0.55);
-const rainMat = new THREE.MeshBasicMaterial({ color:0xcbb8a8, transparent:true, opacity:0.4, depthWrite:false, side:THREE.DoubleSide });
-const rain = new THREE.InstancedMesh(dropGeo, rainMat, rainCount);
-const rdrops = new Float32Array(rainCount*3);
-const dummy = new THREE.Object3D();
-for(let i=0;i<rainCount;i++){
-  rdrops[i*3]=(Math.random()-0.5)*60; rdrops[i*3+1]=Math.random()*24; rdrops[i*3+2]=(Math.random()-0.5)*60;
-  dummy.position.set(rdrops[i*3],rdrops[i*3+1],rdrops[i*3+2]);
-  dummy.rotation.set(0.14,Math.random()*0.2,0.10);
-  dummy.updateMatrix(); rain.setMatrixAt(i,dummy.matrix);
-}
-rain.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-scene.add(rain);
 const carReflTexWarm = (function(){
   const c=document.createElement('canvas'); c.width=128;c.height=256; const g=c.getContext('2d');
   const grd=g.createLinearGradient(0,0,0,256);
@@ -959,21 +942,7 @@ function animate(){
     }
   }
   }
-  // ---- random events scheduler ----
-  if(now>sim.nextWx){
-    sim.nextWx = now + 60000+Math.random()*90000; // every 1-2.5 real min
-    const r=Math.random();
-    if(r<0.34){ // cold snap: charge speed -35% for 60s
-      sim.coldUntil=now+60000; SFX.chime(440,330); toast('🧊 Cold snap · charging slower for a minute');
-    } else if(r<0.62){ // brownout: grid capped
-      sim.brownUntil=now+45000; sim.brownCap= sim.bays.filter(x=>!x.locked).length>2? 500:350; SFX.chime(330,240); toast('⚠️ Brownout · grid capped at '+sim.brownCap+' kW');
-    } else if(r<0.82){ // VIP stranded car: urgent, big tip
-      sim.vipPending=true; sim.vipSpawned=false; toast('👑 VIP stranded outside town — needs rescue charge!');
-      sim.bays.forEach(b=>{ if(!b.locked && b.state==='empty') b.nextArrT = Math.min(b.nextArrT||0, now+(sim.techOwned.priority?1200:4000)); });
-    } else { // weather shift
-      sim.raining = Math.random()<0.5? 0.15+Math.random()*0.2 : 0.65+Math.random()*0.35;
-    }
-  }
+  WEATHER.events(now);
   const cold = now<sim.coldUntil;
   // day rollover at 00:00
   if(sim.gameClock>=24*60){ sim.gameClock-=24*60; endDay(); }
@@ -981,43 +950,7 @@ function animate(){
   WORLD.sign.drawSign(sim.spotPrice*100);
   // (fog density driven by day/night line above)
 
-  // wet shimmer: drift asphalt normal UVs while raining
-  if(sim.raining>0.05 && asphalt.material.normalMap){ asphalt.material.normalMap.offset.x=(asphalt.material.normalMap.offset.x+dt*0.004)%1; asphalt.material.normalMap.offset.y=(asphalt.material.normalMap.offset.y+dt*0.006)%1; }
-  // rain ripples on mirror zone
-  if(mirror.material.uniforms.uWet){ mirror.material.uniforms.uWet.value=sim.raining; mirror.material.uniforms.uTime.value=now*0.001; }
-  if(ripples){ ripples.visible=sim.raining>0.05; ripples.material.map.offset.x=(ripples.material.map.offset.x+dt*0.05)%1; ripples.material.map.offset.y=(ripples.material.map.offset.y+dt*0.07)%1; ripples.material.opacity=0.06+sim.raining*0.10; }
-  // gentle breeze sway on authored foliage (stronger in wind/rain)
-  if(windSway.length){ const gust=0.6+sim.raining*1.2; for(const w of windSway){ w.o.rotation.z=Math.sin(now*0.0011*(1+w.ph*0.1)+w.ph)*w.amp*gust; w.o.rotation.x=Math.cos(now*0.0009+w.ph)*w.amp*0.6*gust; } }
-  // rain update — streak drop + reinstance
-  const fall=(9+sim.raining*11)*dt, wind=sim.raining*2.2*dt;
-  for(let i=0;i<rainCount;i++){
-    rdrops[i*3+1]-=fall; rdrops[i*3]+=wind;
-    // canopy shelter: drops over the roofed footprint get bounced off the roof to a random spot beyond its edge
-    const rx=rdrops[i*3], rz=rdrops[i*3+2];
-    if(rx>-10.4&&rx<10.4&&rz>-7.8&&rz<1.8){
-      const side=Math.random()<0.5?-1:1;
-      rdrops[i*3]= side<0? -10.6-Math.random()*14 : 10.6+Math.random()*14;
-      rdrops[i*3+2]= (Math.random()-0.5)*44;
-      rdrops[i*3+1]= 14+Math.random()*10;
-    }
-    if(rdrops[i*3+1]<0){ rdrops[i*3+1]=20+Math.random()*4; rdrops[i*3]=(camera.position.x+(Math.random()-0.5)*46); rdrops[i*3+2]=(camera.position.z+(Math.random()-0.5)*46); }
-    if(Math.abs(rdrops[i*3]-camera.position.x)>26||Math.abs(rdrops[i*3+2]-camera.position.z)>26){
-      rdrops[i*3]=(camera.position.x+(Math.random()-0.5)*46); rdrops[i*3+2]=(camera.position.z+(Math.random()-0.5)*46); rdrops[i*3+1]=18+Math.random()*6;
-    }
-    dummy.position.set(rdrops[i*3],rdrops[i*3+1],rdrops[i*3+2]); dummy.rotation.set(0.14,0,0.10); dummy.updateMatrix(); rain.setMatrixAt(i,dummy.matrix);
-  }
-  rain.instanceMatrix.needsUpdate=true;
-  rainMat.opacity = 0.28+sim.raining*0.30;
-  // camera lens droplets overlay
-  const sheltered = camera.position.x>-10.2 && camera.position.x<10.2 && camera.position.z>-7.6 && camera.position.z<1.6;
-  if(lensFx){ const eff= sim.raining*(sheltered?0.12:1.15); lensFx.style.opacity = Math.min(1, eff); sim.raining>0.05 && !sheltered && lensDrip(dt); }
-  let wx = ATMO.nightK>0.82? 'Clear night' : (ATMO.nightK>0.25? 'Dusk' : 'Clear');
-  if(sim.raining>0.4) wx = ATMO.nightK>0.82? 'Rainy night' : ATMO.nightK>0.25? 'Rainy dusk' : 'Light rain';
-  if(now<sim.coldUntil) wx = sim.raining>0.4? 'Freezing rain' : 'Cold snap';
-  if(sim.raining>0.4 && sheltered) wx += ' · dry under canopy';
-  if(now<sim.brownUntil) wx += ' + Brownout';
-  wxEl.textContent = wx;
-  SFX.setRain(sim.raining);
+  WEATHER.tick(dt, now);
   let maxSpd=0;
   for(const b of sim.bays){ if(b.car){ wetUpdate(b.car, dt, performance.now()); maxSpd=Math.max(maxSpd, b.car.userData.speed||0); b.car.userData.speed=0; } }
   SFX.setTire(Math.min(1, maxSpd/9));
@@ -1386,7 +1319,7 @@ function toggleTechMenu(force){
   if(techOpen){ renderTech(); if(!isTouch) controls.unlock(); }
   else if(!isTouch && !touchMode) controls.lock();
 }
-initLensFx();
+WEATHER.initLensFx();
 loadAssets().catch(e=>{ console.error('asset load failed', e && e.type, e && e.message); sim.ready=true; if(!envReady) envReady=true; });
 setInterval(()=>{ if(sim.ready) saveGame(); }, 30000);
 addEventListener('beforeunload', ()=>{ if(sim.ready) saveGame(); });
