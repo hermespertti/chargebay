@@ -15,7 +15,7 @@ await S("document.getElementById('start').style.display='none';");
 await S("window.__GAME.weather(1); window.__GAME.clearBay(0); window.__GAME.forceArr(0);");
 await new Promise(r=>setTimeout(r,2500));
 // front 3/4 of bay 0 car so windshield + wipers face camera
-await S("(()=>{const g=window.__GAME;const p=g.carPos(0);if(p){g.pose(p.x+4.5,0.95,p.z-5.0,0,0);g.lookAt(p.x,0.6,p.z,6.7);}})()");
+await S("(()=>{const g=window.__GAME;const p=g.carPos(0);if(p){g.pose(p.x+4.5,0.95,p.z+5.0,0,0);g.lookAt(p.x,0.6,p.z,6.7);}})()");
 await new Promise(r=>setTimeout(r,1800));
 await pg.screenshot({path:'progress/artifacts/wet_car.png'});
 console.log('tire audio node:', await S("!!(window.__SFXREF)"));

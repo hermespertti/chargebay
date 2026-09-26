@@ -874,24 +874,8 @@ function buildWetRig(car){
     }
     paints.push({o:o, base:{cc:o.material.clearcoat, ccr:o.material.clearcoatRoughness}});
   } });
-  // wiper pivot at windshield base (front is -Z world at spawn yaw PI)
-  const bb=new THREE.Box3().setFromObject(car);
-  const wiperMat=new THREE.MeshStandardMaterial({color:0x0a0c10, roughness:0.6, metalness:0.3});
+  // wiper arms omitted: procedural cars lack a reliable cowl anchor; beads+hum carry the rain read instead
   const pivots=[];
-  for(const side of [-1,1]){
-    const p=new THREE.Group();
-    // world-space anchor: windshield base = front of car (world -Z at spawn yaw), then convert into car local
-    const wp=new THREE.Vector3(car.position.x + side*0.32, bb.max.y-0.42, bb.min.z+0.30);
-    p.position.copy(car.worldToLocal(wp));
-    // car-local Y = up => pivot.rotation.y sweeps around vertical (clean wiper arc)
-    const tilt=new THREE.Group(); tilt.rotation.x=-1.15; p.add(tilt);   // raise arm along raked glass (local +Z→+Y-ish)
-    const arm=new THREE.Mesh(new THREE.BoxGeometry(0.02,0.02,0.42), wiperMat);
-    arm.geometry.translate(0,0,0.21);
-    const blade=new THREE.Mesh(new THREE.BoxGeometry(0.012,0.055,0.40), wiperMat);
-    blade.position.set(0,0,0.44);
-    tilt.add(arm); tilt.add(blade); car.add(p);
-    pivots.push({p, side, t:Math.random()*6});
-  }
   car.userData.wetRig={paints, pivots, lastState:null};
 }
 function wetUpdate(car, dt, raining, tNow){
@@ -908,7 +892,7 @@ function wetUpdate(car, dt, raining, tNow){
   for(const w of wr.pivots){
     if(raining){
       const prev=w.t; w.t+=dt*2.4;
-      w.p.rotation.y = Math.sin(w.t)*(w.side<0? 0.9 : 0.85);
+      w.p.rotation.y = Math.sin(w.t)*(w.side<0? 0.5 : 0.42);
       w.p.visible = true;
       // squeak at sweep reversals (sin crosses extremum)
       if(Math.sin(prev)>0.995 || Math.sin(prev)<-0.995) wr.squeakT=(wr.squeakT||0)+1;
@@ -1935,6 +1919,8 @@ window.__GAME = {
   tailGlow(i){ const car=bays[i]&&bays[i].car; if(!car) return null; let mx=0; car.traverse(o=>{ if(o.isMesh&&o.material&&/tail/i.test(o.material.name||'')) mx=Math.max(mx,o.material.emissiveIntensity); }); return +mx.toFixed(2); },
   finishArr(i){ const b=bays[i]; if(b.state==='arriving'&&b.car){ b.car.position.z=b.driveTo; b.car.rotation.y=Math.PI+(b.x-b.car.position.x)*0.035; b.state='parked'; b.car.userData.arrived=performance.now(); } return b.state; },
   kickBay(i){ const b=bays[i]; if(b.car&&b.state!=='departing'){ b.state='departing'; b.plugged=false; } return b.state; },
+  probeCar(i){ const car=bays[i]&&bays[i].car; if(!car) return null; const out={yaw:+car.rotation.y.toFixed(2), pos:car.position.toArray().map(v=>+v.toFixed(2))}; car.updateMatrixWorld(true);
+    const named={}; car.traverse(o=>{ if(o.isMesh && /glass|head|tail|windshield/i.test(o.name||'')){ const bb=new THREE.Box3().setFromObject(o); if(!named[o.name]) named[o.name]={min:bb.min.toArray().map(v=>+v.toFixed(2)),max:bb.max.toArray().map(v=>+v.toFixed(2))}; } }); out.parts=named; return out; },
   clearBay(i){ const b=bays[i]; if(b.car){ scene.remove(b.car); b.car=null; } b.state='empty'; b.plugged=false; return 'ok'; },
   spokeInfo(i){ const car=bays[i]&&bays[i].car; if(!car) return {e:'nocar'}; const out=[]; car.updateMatrixWorld(true); car.traverse(o=>{ if(o.isMesh && /^Spoke[0-9]+|Spoke_[0-9]+/.test(o.name) && out.length<8){ const wp=new THREE.Vector3(); o.getWorldPosition(wp); out.push({n:o.name, l:[+o.position.x.toFixed(2),+o.position.y.toFixed(2),+o.position.z.toFixed(2)], w:[+wp.x.toFixed(2),+wp.y.toFixed(2),+wp.z.toFixed(2)]}); } }); return {yaw:car.rotation.y, pos:car.position.toArray().map(v=>+v.toFixed(2)), wheels:out}; },
   audio(){ return { active: !!(window.__SFXREF && window.__SFXREF.ctx), muted: SFX.muted }; },
