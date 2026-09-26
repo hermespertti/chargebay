@@ -590,7 +590,7 @@ draco.setDecoderPath('vendor/libs/draco/gltf/');
 loader.setDRACOLoader(draco);
 function loadGLB(path){ return new Promise((res,rej)=>{ const to=setTimeout(()=>rej(new Error('timeout '+path)), 120000); loader.load(path,(g)=>{clearTimeout(to);res(g);},(e)=>{},(e)=>{clearTimeout(to);rej(new Error('loadfail '+path+' '+(e&&(e.message||e.type||''))));}); }); }
 
-let chargerProto=null, carProtos=[], origProtos=[];
+let chargerProto=null, carProtos=[], origProtos=[], segProto={};
 const bays = BAYS.map(x=>({ x, charger:null, car:null, state:'empty', plug:null, plugHome:null, chargeKwh:0, sessionRev:0, sessionCost:0, price:0.124, tier:0, kw:150, sell:0.25 }));
 
 const PAINTS = [0x0a2e6b, 0xe8dcc8, 0x8f0f14, 0x1c2026, 0x0f4d3a, 0x6b6e73];
@@ -692,10 +692,19 @@ async function loadAssets(){
     v.traverse(o=>{ if(o.isMesh&&o.material&&o.material.name&&o.material.name.startsWith('Paint')){ o.material=o.material.clone(); o.material.color.setHex(col); } });
     carProtos.push(v);
   }
-  // ORIGINAL car (authored in Blender by this project): car_ev1 + paint variants
-  try{
-    const og = await loadGLB('assets/car_ev1.glb');
-    const o1 = orientCar(og.scene); boostEnv(o1, 3.0);
+  // ORIGINAL fleet (authored in Blender by this project): sedan/suv/van/retro + paint variants
+  const FLEET_DEF = [
+    { file:'assets/car_ev1.glb', seg:'sedan', port:[-0.60,0.62,-0.88] },
+    { file:'assets/car_suv.glb', seg:'suv',   port:[-0.70,0.92,-0.95] },
+    { file:'assets/car_van.glb', seg:'van',   port:[-1.20,0.96,-0.99] },
+    { file:'assets/car_retro.glb', seg:'retro', port:[-0.50,0.80,-0.83] },
+  ];
+  segProto = {};
+  for(const fd of FLEET_DEF){
+    try{
+      const og = await loadGLB(fd.file);
+      const o1 = orientCar(og.scene); boostEnv(o1, 3.0);
+      o1.userData.protoPort = fd.port;
     o1.traverse(o=>{ if(o.isMesh&&o.material){ const ms=Array.isArray(o.material)?o.material:[o.material];
       for(const m of ms){ const n=(m.name||'').toLowerCase();
         if(n.includes('glass')){ m.transparent=true; m.opacity=0.5; m.roughness=0.05; m.metalness=0.9; m.envMapIntensity=4.0; m.side=THREE.FrontSide; }
@@ -705,15 +714,16 @@ async function loadAssets(){
         if(n.includes('caliper')){ m.emissive=new THREE.Color(0xff3300); m.emissiveIntensity=0.35; }
         if(n.includes('tire')||n.includes('brakedisc')){ m.envMapIntensity=0.6; }
       } } });
-    origProtos.push(o1);
+    segProto[fd.seg]=[o1];
     for(const col of [PAINTS[2], PAINTS[0], 0x11131a, 0xe8dcc8]){
       const v = o1.clone(true);
       v.traverse(o=>{ if(o.isMesh&&o.material&&o.material.name&&o.material.name.toLowerCase().includes('paint')){ o.material=o.material.clone(); o.material.color.setHex(col); } });
-      origProtos.push(v);
+      segProto[fd.seg].push(v);
     }
-    origProtos.forEach(p=>carProtos.push(p));
-    console.log('STAGE orig car ok', origProtos.length);
-  }catch(e){ console.warn('orig car skipped', e&&e.message); }
+    segProto[fd.seg].forEach(p=>origProtos.push(p));
+    console.log('STAGE fleet', fd.seg, segProto[fd.seg].length);
+  }catch(e){ console.warn('fleet skipped', fd.seg, e&&e.message); }
+  }
   // place chargers
   bays.forEach((b,i)=>{
     const ch = chargerProto.clone(true);
@@ -819,8 +829,10 @@ function bayPort(b){
 // spawn a car at a bay with random paint & battery
 function spawnCar(bay, instant=false, vip=false, seg=null){
   seg = seg || pickSegment();
-  const proto = carProtos[Math.floor(Math.random()*carProtos.length)];
+  const pool = (segProto[seg.id] && segProto[seg.id].length) ? segProto[seg.id] : origProtos;
+  const proto = (pool && pool.length) ? pool[Math.floor(Math.random()*pool.length)] : carProtos[Math.floor(Math.random()*carProtos.length)];
   const car = proto.clone(true);
+  if(proto.userData && proto.userData.protoPort) car.userData.portLocal = new THREE.Vector3(...proto.userData.protoPort);
   car.traverse(o=>{ if(o.isMesh){o.castShadow=true; o.receiveShadow=true;} });
   const sz = seg.id==='van'? 1.28 : seg.id==='suv'? 1.12 : seg.id==='taxi'? 1.0 : seg.id==='retro'? 0.94 : 1.0;
   car.scale.multiplyScalar(sz); bay.carScale=sz;
@@ -1691,6 +1703,15 @@ window.__GAME = {
   techmenu(force){ toggleTechMenu(force); return techOpen; },
   aimPort(i){ const b=bays[i]; if(!b.car) return 'nocar'; const p=bayPort(b); camera.position.set(p.x+1.35, p.y+0.15, p.z+0.45); camera.lookAt(p); return 'ok'; },
   portPos(i){ const b=bays[i]; if(!b.car) return null; const p=bayPort(b); return {x:+p.x.toFixed(2),y:+p.y.toFixed(2),z:+p.z.toFixed(2)}; },
+  forceSeg(i,id,ci){ const p=(segProto[id]&&segProto[id][ci||0])||(origProtos[0]); if(!p) return 'nopool';
+    const car=p.clone(true); if(bays[i].car){ scene.remove(bays[i].car); }
+    car.traverse(o=>{ if(o.isMesh){o.castShadow=true;o.receiveShadow=true;} });
+    if(p.userData.protoPort) car.userData.portLocal=new THREE.Vector3(...p.userData.protoPort);
+    car.userData={...car.userData, battery:0.2, need:0.9, patience:9999, arrived:performance.now(), vip:false, seg:(SEGMENTS.find(s=>s.id===id)||SEGMENTS[0]), packKwh:80, portLocal:(p.userData.protoPort?new THREE.Vector3(...p.userData.protoPort):car.userData.portLocal)};
+    bays[i].car=car; bays[i].state='parked'; bays[i].plugged=false; scene.add(car);
+    const p0=bays[i].car.position; car.position.set(bays[i].x,0,-3.1);
+    if(bays[i].cshadow){bays[i].cshadow.position.set(bays[i].x,0.018,-3.1);bays[i].cshadow.visible=true;}
+    return 'ok '+id; },
   forceOrig(i,ci){ scene.traverse(o=>{ if(o.type==='Group'&&o!==bays[i]?.car&&o.userData&&o.userData.fleet) o.visible=false; });
     bays.forEach((bb,j)=>{ if(j!==i&&bb.car){ bb.car.visible=false; } if(bb.cshadow&&j!==i) bb.cshadow.visible=false; });
     const b=bays[i]; if(b.car){ scene.remove(b.car); b.car=null; }
