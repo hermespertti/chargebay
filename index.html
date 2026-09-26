@@ -44,7 +44,7 @@
   .tbtn{position:absolute;right:22px;width:74px;height:74px;border-radius:50%;background:rgba(13,34,51,.6);border:1px solid #8fe3ff66;color:#dff4ff;font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;-webkit-user-select:none;touch-action:none;}
   #tE{bottom:110px;} #tR{bottom:24px; right:110px;} #tM{bottom:110px; right:110px; width:48px; height:48px; font-size:16px; opacity:.85;}
   #lensfx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:0;mix-blend-mode:screen;transition:opacity 1.2s;}
-  #tech{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(4,8,14,.55);z-index:14;}
+  #tech{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(4,8,14,.55);z-index:20;}
   #goals{position:absolute;top:12px;right:12px;background:rgba(6,12,20,.72);border:1px solid rgba(80,200,255,.25);border-radius:10px;padding:10px 14px;font:12px/1.5 'Segoe UI',sans-serif;color:#cfe6ff;z-index:5;backdrop-filter:blur(6px);min-width:190px;}
   #goals h3{margin:0 0 6px;font-size:12px;letter-spacing:.12em;color:#7fd4ff;}
   #goals .g{display:flex;justify-content:space-between;gap:10px;padding:2px 0;}
@@ -52,7 +52,7 @@
   #goals .g b{color:#ffd166;font-weight:600;}
   #goals .g.done b{color:#79f2a8;}
   #streak{margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.12);font-size:11px;color:#9db8d4;}
-  #daycard{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(3,6,12,.78);z-index:16;}
+  #daycard{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(3,6,12,.78);z-index:22;}
   #daycardbox{background:linear-gradient(160deg,#0c1622,#0a1018);border:1px solid rgba(80,200,255,.35);border-radius:16px;padding:26px 34px;min-width:340px;color:#e8f4ff;font:14px/1.6 'Segoe UI',sans-serif;box-shadow:0 0 60px rgba(0,120,200,.25);text-align:center;}
   #daycardbox h2{margin:0 0 14px;font-size:22px;letter-spacing:.06em;color:#ffd166;}
   #dcStats{text-align:left;margin:0 auto 14px;max-width:300px;}
@@ -64,8 +64,8 @@
   #dcStreak{font-size:13px;color:#7fd4ff;margin-bottom:16px;}
   #dcBtn{background:linear-gradient(90deg,#0a84ff,#38bdf8);border:none;border-radius:8px;color:#02121f;font-weight:700;font-size:14px;padding:10px 22px;cursor:pointer;letter-spacing:.05em;}
   #dcBtn:hover{filter:brightness(1.15);}
-  .tlock{display:inline-block;margin-left:8px;font-size:10px;padding:2px 8px;border-radius:8px;background:rgba(255,120,80,.16);color:#ffab8f;border:1px solid rgba(255,120,80,.4);letter-spacing:.06em;}
-  .teff{display:inline-block;margin-left:8px;font-size:10px;padding:2px 8px;border-radius:8px;background:rgba(90,220,160,.14);color:#8df0bc;border:1px solid rgba(90,220,160,.35);letter-spacing:.06em;}
+  .tlock{display:inline-block;margin-left:8px;font-size:11px;font-weight:600;padding:2px 9px;border-radius:8px;background:rgba(255,140,90,.22);color:#ffd0bc;border:1px solid rgba(255,150,100,.65);letter-spacing:.06em;}
+  .teff{display:inline-block;margin-left:8px;font-size:11px;font-weight:600;padding:2px 9px;border-radius:8px;background:rgba(90,220,160,.18);color:#b8f7d6;border:1px solid rgba(90,220,160,.5);letter-spacing:.06em;}
   .tcard.locked{opacity:.55;filter:grayscale(.4);}
   #rep .good{color:#79f2a8;font-weight:600;margin-left:4px;} #rep .bad{color:#ff7a6e;font-weight:600;margin-left:4px;}
   #techflash{position:absolute;inset:0;pointer-events:none;z-index:13;display:none;background:radial-gradient(ellipse at center,rgba(120,220,255,.35),transparent 70%);}
