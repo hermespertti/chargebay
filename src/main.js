@@ -698,6 +698,7 @@ async function loadAssets(){
     { file:'assets/car_suv.glb', seg:'suv',   port:[-0.70,0.92,-0.95] },
     { file:'assets/car_van.glb', seg:'van',   port:[-1.20,0.96,-0.99] },
     { file:'assets/car_retro.glb', seg:'retro', port:[-0.50,0.80,-0.83] },
+    { file:'assets/car_vip.glb', seg:'super', port:[-0.55,0.58,-0.90] },
   ];
   segProto = {};
   for(const fd of FLEET_DEF){
@@ -916,6 +917,7 @@ function wetUpdate(car, dt, raining, tNow){
 }
 function spawnCar(bay, instant=false, vip=false, seg=null){
   seg = seg || pickSegment();
+  if(vip && segProto['super'] && segProto['super'].length) seg = SEGMENTS.find(s=>s.id==='super') || seg;
   const pool = (segProto[seg.id] && segProto[seg.id].length) ? segProto[seg.id] : origProtos;
   const proto = (pool && pool.length) ? pool[Math.floor(Math.random()*pool.length)] : carProtos[Math.floor(Math.random()*carProtos.length)];
   const car = proto.clone(true);
@@ -1012,6 +1014,7 @@ const SEGMENTS = [
   { id:'suv',   name:'SUV',        pack:95,  patience:[180,260], fee:0.95, w:3, paint:null },
   { id:'van',   name:'Delivery van',pack:110,patience:[240,320], fee:0.88, w:2, paint:0xdfe4ea },
   { id:'retro', name:'Retro classic',pack:40,patience:[120,180], fee:1.35, w:1, paint:0x8a2be2 },
+  { id:'super', name:'Supercar',     pack:105,patience:[80,120],  fee:1.60, w:1, paint:null },
 ];
 function pickSegment(){
   const h=Math.floor(gameClock/60);
