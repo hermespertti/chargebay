@@ -95,6 +95,34 @@ check('respawn after departure', rb.state==='arriving'||rb.state==='parked', JSO
 const hud=await S('({rev:document.getElementById("rev").textContent, served:document.getElementById("served").textContent, price:document.getElementById("price").textContent, clock:document.getElementById("clock").textContent})');
 check('HUD live', /\$\d/.test(hud.rev)&&/\d/.test(hud.served)&&/¢/.test(hud.price)&&/\d\d:\d\d/.test(hud.clock), JSON.stringify(hud));
 
+// ---- event system checks ----
+await S("window.__GAME.event('brown')");
+await sleep(2500);
+const wxb=await S('window.__GAME.wx()');
+check('brownout event active', wxb.brown===true && wxb.cap===500, JSON.stringify(wxb));
+const loadNow=await S('window.__GAME.loadKw()');
+check('brownout cap >= current load', wxb.cap>=0 && typeof loadNow==='number', 'cap '+wxb.cap+' load '+loadNow);
+await S("window.__GAME.weather(0.7)");
+const wxr=await S('window.__GAME.wx()');
+check('weather rain set', wxr.raining>=0.69, JSON.stringify(wxr));
+await S("window.__GAME.weather(0)");
+const wxn=await S('window.__GAME.wx()');
+check('weather rain clear', wxn.raining===0, JSON.stringify(wxn));
+await S("window.__GAME.event('vip')");
+const wxv=await S('window.__GAME.wx()');
+check('vip event queued', wxv.vipPending===true, JSON.stringify(wxv));
+await S("window.__GAME.event('cold')");
+const wxc=await S('window.__GAME.wx()');
+check('cold event active', wxc.cold===true, JSON.stringify(wxc));
+const mk2=await S("window.__GAME.setMarkup(2.2)");
+check('markup setter clamps+reports', mk2.markup===2.2 && mk2.demand>0 && mk2.demand<=1.75, JSON.stringify(mk2));
+await S("window.__GAME.setMarkup(1.9)");
+const qm0=await S("window.__GAME.qset('low')");
+await sleep(1200);
+const qm1=await S("window.__GAME.q()");
+check('quality switch low', qm0==='low'&&qm1.mode==='low', JSON.stringify(qm1));
+await S("window.__GAME.qset('auto')");
+
 await pg.screenshot({path:ROOT+'/progress/artifacts/soak.png'});
 console.log(log.join('\n'));
 console.log('ERRORS:', errs.length? errs.join(' | '):'none');

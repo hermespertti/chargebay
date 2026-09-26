@@ -14,6 +14,8 @@ import { SFX } from './audio.js';
 import { asphaltTextures, asphaltNormal, puddleMaskStatic, blobTex, streakTexture, facadeTex, barPctTex, shadowTex, carReflTexRed } from './textures.js';
 import { CABLE_SEGS, CABLE_LEN, CABLE_RANGE, makeCable, cableStep } from './cable.js';
 import { PACK_KWH, TIERS, SEGMENTS, TECH, GOAL_POOL } from './config.js';
+import { createAtmosphere } from './atmosphere.js';
+import { createWorld } from './world.js';
 
 // ---------------- core ----------------
 const app = document.getElementById('app');
@@ -30,170 +32,20 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(72, innerWidth/innerHeight, 0.05, 400);
 camera.position.set(2.2, 1.65, 7.5);
 
+// quality settings (shared with atmosphere via Q)
+const QKEY='chargebay_quality_v1';
+const Q = { mode: 'auto', glare: 1.0, envMax: 2.2 };
+
+// ---- atmosphere: HDRI env, sky, fog, sun/rake/hemi, day-night cycle ----
+// ---- world props: canopy, price sign, backdrop, curbs/trees, guard+road ----
+const WORLD = createWorld();
+scene.add(WORLD.canopy, WORLD.sign.g, WORLD.backdrop, WORLD.curbs, WORLD.guard);
+const ATMO = createAtmosphere(renderer, scene, Q);
+const { sky, horizonGlow, fog, sun, rake, hemi, nightFixtures, applyDaylight, collectNightLights } = ATMO;
+
 // time of day — fixed golden-dusk for now, driven by clock var
 const DAY = { t: 0.78 }; // 0..1, dusk ~0.75-0.82
 
-// PMREM env for PBR reflections
-let envReady=false;
-const HDRI = localStorage.getItem('cb_hdri') || 'assets/hdri/venice_sunset.hdr';
-new RGBELoader().load(HDRI, (hdr)=>{
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  pmrem.compileEquirectangularShader();
-  hdr.wrapS = THREE.RepeatWrapping; hdr.wrapT = THREE.ClampToEdgeWrapping;
-  hdr.offset.y = parseFloat(localStorage.getItem('cb_hdri_v')||'-0.12');   // drop sun toward horizon
-  hdr.offset.x = parseFloat(localStorage.getItem('cb_hdri_u')||'0.0');
-  const env = pmrem.fromEquirectangular(hdr).texture;
-  scene.environment = env;
-  scene.background = env;
-  scene.backgroundIntensity = 1.0;
-  if('environmentIntensity' in scene) scene.environmentIntensity = 1.15;
-  hdr.dispose(); pmrem.dispose();
-  sky.visible = false;
-  hdriBG = true;
-  // force IBL response on all standard materials (incl clearcoat on hero car)
-  scene.traverse(o=>{
-    if(o.isMesh && o.material){
-      const ms = Array.isArray(o.material)?o.material:[o.material];
-      for(const m of ms){ if(m.isMeshStandardMaterial){ m.envMapIntensity = Math.min(m.envMapIntensity||1, 1.5); if('clearcoat' in m){ m.clearcoat=0.85; m.clearcoatRoughness=0.12; } m.needsUpdate=true; } }
-    }
-  });
-  envReady = true;
-}, undefined, (err)=>{ console.warn('hdri failed, shader sky fallback', err); refreshSkyEnv(); envReady = true; });
-function refreshSkyEnv(){
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  const envScene = new THREE.Scene();
-  envScene.add(sky.clone());
-  const gm = new THREE.Mesh(new THREE.PlaneGeometry(200,200), new THREE.MeshBasicMaterial({color:0x241a12}));
-  gm.rotation.x=-Math.PI/2; gm.position.y=-1; envScene.add(gm);
-  scene.environment = pmrem.fromScene(envScene, 0.04).texture;
-  pmrem.dispose();
-}
-
-// ---------------- quality settings (early for applyDaylight) ----------------
-const QKEY='chargebay_quality_v1';
-const Q = { mode: 'auto', glare: 1.0, envMax: 2.2 };  // auto|high|med|low  (loaded properly later)
-
-// ---------------- fog & sky ----------------
-let hdriBG = false;
-const fog = new THREE.FogExp2(0x3a3048, 0.006);
-scene.fog = fog;
-
-function makeSky() {
-  const geo = new THREE.SphereGeometry(300, 32, 16);
-  const mat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    uniforms: { topCol:{value:new THREE.Color()}, midCol:{value:new THREE.Color()}, botCol:{value:new THREE.Color()}, sunDir:{value:new THREE.Vector3()}, sunCol:{value:new THREE.Color()} },
-    vertexShader: `varying vec3 vP; void main(){ vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
-    fragmentShader: `
-      varying vec3 vP;
-      uniform vec3 topCol,midCol,botCol,sunCol; uniform vec3 sunDir;
-      void main(){
-        vec3 d = normalize(vP);
-        float h = d.y;
-        vec3 c = mix(botCol, midCol, smoothstep(-0.05,0.30,h));
-        c = mix(c, topCol, smoothstep(0.22,0.75,h));
-        // tiny blue-grey lift toward very top to kill maroon seam
-        c = mix(c, topCol*1.12+vec3(0.03,0.03,0.06), smoothstep(0.72,1.0,h));
-        // sun afterglow
-        float s = max(dot(d, normalize(sunDir)),0.);
-        c += sunCol * (pow(s,14.)*0.85 + pow(s,4.)*0.28);
-        // soft procedural wispy clouds
-        float n1 = sin(d.x*4.0+d.y*2.0)*sin(d.z*3.3-d.y*1.5)*0.5+0.5;
-        float n2 = sin(d.x*9.0-d.z*7.0)*0.5+0.5;
-        float wis = smoothstep(0.55,0.95, (n1*0.7+n2*0.3)*smoothstep(0.02,0.4,h));
-        c = mix(c, mix(c*1.25, vec3(0.52,0.44,0.56), 0.5), wis*0.35);
-        // ordered dither to kill banding
-        float dt = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233)))*43758.5453);
-        c += (dt-0.5)/255.0*3.0;
-        gl_FragColor = vec4(c,1.);
-      }`
-  });
-  return new THREE.Mesh(geo, mat);
-}
-const sky = makeSky(); scene.add(sky);
-// warm horizon scattering dome overlay (additive) to push HDRI dusk warmth
-const horizonGlow = new THREE.Mesh(new THREE.SphereGeometry(290,32,16), new THREE.ShaderMaterial({
-  side: THREE.BackSide, transparent:true, depthWrite:false, blending: THREE.AdditiveBlending,
-  uniforms:{}, vertexShader:`varying vec3 vP; void main(){ vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
-  fragmentShader:`varying vec3 vP; void main(){ float h=normalize(vP).y;
-    float band = exp(-abs(h)*4.2);                    // broader horizon band
-    float low  = exp(-max(h,0.0)*2.2);               // broad lower glow
-    vec3 warm = vec3(0.85,0.44,0.20)*band*0.55 + vec3(0.72,0.36,0.22)*low*0.20;
-    float dt = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233)))*43758.5453);
-    gl_FragColor = vec4(warm + (dt-0.5)/255.0*2.0, 1.0); }`
-})); horizonGlow.renderOrder = -1; scene.add(horizonGlow);
-// ---- day/night cycle: drives sun, sky, fog, exposure, HDRI blend, fixtures ----
-let nightK = 1;              // 0=full day, 1=deep night
-let bloomPass = null;        // set once composer exists
-const nightFixtures = [];
-const sunPath = new THREE.Vector3();
-const cTop=new THREE.Color(), cMid=new THREE.Color(), cBot=new THREE.Color(), cSun=new THREE.Color(), cFog=new THREE.Color();
-function hDay(a,b,k,out){ out.copy(a).lerp(b,k); return out; }
-const DAY_TOP=new THREE.Color(0x2f6fd0), DAY_MID=new THREE.Color(0x9cc4ea), DAY_BOT=new THREE.Color(0xefe6d2), DAY_SUN=new THREE.Color(0xfff8e2);
-const DUSK_TOP=new THREE.Color(0x2c2650), DUSK_MID=new THREE.Color(0x6a4a72), DUSK_BOT=new THREE.Color(0xe0783c), DUSK_SUN=new THREE.Color(0xff8a3a);
-const NIGHT_TOP=new THREE.Color(0x05070f), NIGHT_MID=new THREE.Color(0x0b1020), NIGHT_BOT=new THREE.Color(0x1a1430), NIGHT_SUN=new THREE.Color(0x9db4ff);
-function applyDaylight(min){
-  if(min==null) min = 18*60+42;
-  const t = ((min/1440)*Math.PI*2) - Math.PI/2; // noon=apex, midnight=floor
-  const elev = Math.sin(t)*0.62;
-  const az = Math.cos(t);
-  sunPath.set(az, Math.max(elev, 0.02), -0.55).normalize();
-  // bands: nightAmt 1 at deep night, dayAmt 1 in daylight, dusk between
-  const dayAmt  = THREE.MathUtils.smoothstep(elev, 0.04, 0.45);
-  const nightAmt = 1 - THREE.MathUtils.smoothstep(elev, -0.30, 0.10);
-  nightK = nightAmt;
-  // sky: NIGHT -> DUSK -> DAY two-band blend
-  hDay(DUSK_TOP, DAY_TOP, dayAmt, cTop);     hDay(cTop, NIGHT_TOP, nightAmt, cTop);
-  hDay(DUSK_MID, DAY_MID, dayAmt, cMid);     hDay(cMid, NIGHT_MID, nightAmt, cMid);
-  hDay(DUSK_BOT, DAY_BOT, dayAmt, cBot);     hDay(cBot, NIGHT_BOT, nightAmt, cBot);
-  hDay(DUSK_SUN, DAY_SUN, THREE.MathUtils.smoothstep(elev,0.05,0.35), cSun);
-  if(nightAmt>0) hDay(cSun, NIGHT_SUN, nightAmt, cSun);
-  const u = sky.material.uniforms;
-  u.topCol.value.copy(cTop); u.midCol.value.copy(cMid); u.botCol.value.copy(cBot);
-  u.sunCol.value.copy(cSun); u.sunDir.value.copy(sunPath);
-  // fog follows sky bottom hue
-  cFog.copy(cBot).lerp(cMid, 0.5); fog.color.copy(cFog);
-  // sun lights along the path
-  sun.color.copy(cSun); sun.intensity = 0.5 + dayAmt*5.0 + (1-nightAmt)*(1-dayAmt)*4.0;
-  sun.position.set(sunPath.x*40, Math.max(sunPath.y*40, 3), sunPath.z*40);
-  rake.color.copy(cSun); rake.intensity = 0.3 + dayAmt*2.6 + (1-nightAmt)*(1-dayAmt)*3.4;
-  rake.position.set(sunPath.z*-24, 4.0, sunPath.x*-24);
-  hemi.intensity = 0.08 + dayAmt*0.8 + (1-nightAmt)*(1-dayAmt)*0.24;
-  hemi.color.copy(cMid);
-  renderer.toneMappingExposure = 0.82 + dayAmt*0.6 + nightAmt*0.12;
-  // HDRI blend: day brightens env, night deepens it
-  scene.backgroundIntensity = (0.28 + (1-nightAmt)*0.95) * Q.glare;
-  if('environmentIntensity' in scene) scene.environmentIntensity = (0.18 + (1-nightAmt)*1.4) * Q.glare;
-  // day: bright procedural dome covers the dusk HDRI; dusk/night: HDRI sky shows
-  sky.visible = !hdriBG || dayAmt > 0.45;
-  horizonGlow.material.opacity = Math.max(0.06, (1-nightAmt)*(1-dayAmt)*0.85 + nightAmt*0.10);
-  if(bloomPass) bloomPass.strength = 0.08 + nightAmt*0.38;
-  // fixtures: lights glow as darkness rises
-  const fx = 0.12 + nightAmt*0.88;
-  for(const m of nightFixtures){ m.emissiveIntensity = m.userData.baseEI*fx; }
-}
-function collectNightLights(){
-  nightFixtures.length=0;
-  scene.traverse(o=>{
-    if(o.isMesh && o.material){
-      const ms=Array.isArray(o.material)?o.material:[o.material];
-      for(const m of ms){ if(m.isMeshStandardMaterial && m.emissive && m.emissiveIntensity>0 && m.userData.baseEI===undefined){ m.userData.baseEI=m.emissiveIntensity; nightFixtures.push(m); } }
-    }
-  });
-}
-setTimeout(()=>{ if(!envReady) refreshSkyEnv(); }, 50);
-
-// lights
-const hemi = new THREE.HemisphereLight(0x6a5060, 0x241408, 0.28); scene.add(hemi);
-const rake = new THREE.DirectionalLight(0xff7a35, 4.6); rake.position.set(-22, 4.0, 16); rake.castShadow=true; rake.shadow.mapSize.set(2048,2048); rake.shadow.camera.left=-30; rake.shadow.camera.right=30; rake.shadow.camera.top=30; rake.shadow.camera.bottom=-30; rake.shadow.bias=-0.0005; scene.add(rake);
-const sun = new THREE.DirectionalLight(0xff9a4d, 3.2);
-sun.position.set(-30, 9, -14);
-sun.castShadow = true;
-sun.shadow.mapSize.set(2048,2048);
-sun.shadow.camera.left=-30; sun.shadow.camera.right=30; sun.shadow.camera.top=30; sun.shadow.camera.bottom=-30;
-sun.shadow.camera.near=1; sun.shadow.camera.far=120; sun.shadow.bias=-0.0004;
-scene.add(sun);
-applyDaylight();
 const {colorTex:asphaltColor, roughnessMap:asphaltRough} = asphaltTextures();
 const asphaltNormalTex = asphaltNormal();
 const asphalt = new THREE.Mesh(
@@ -357,163 +209,6 @@ function softWetMask(){
   }
   const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.ClampToEdgeWrapping; t.repeat.set(1,1); return t;
 }
-
-// ---------------- canopy with LEDs + solar ----------------
-function buildCanopy(){
-  const g = new THREE.Group();
-  const steel = new THREE.MeshStandardMaterial({color:0x363a42, metalness:0.9, roughness:0.32, envMapIntensity:2.0});
-  const dark  = new THREE.MeshStandardMaterial({color:0x22262e, metalness:0.55, roughness:0.45, envMapIntensity:1.8});
-  const solar = new THREE.MeshStandardMaterial({color:0x0a1226, metalness:0.85, roughness:0.15, envMapIntensity:2.2});
-  const led = new THREE.MeshStandardMaterial({color:0x14100c, emissive:0xd8a878, emissiveIntensity:0.8});
-  const fill = new THREE.PointLight(0xffb888, 24, 30, 1.8); fill.position.set(0,3.6,-1.0); g.add(fill);
-  const fill2 = new THREE.PointLight(0xffa068, 14, 24, 1.6); fill2.position.set(0,1.6,3.5); g.add(fill2);
-  const ledW = new THREE.MeshStandardMaterial({color:0x140e08, emissive:0xd89050, emissiveIntensity:0.9});
-  // roof slab (light-painted ceiling below so it doesn't read as a black void)
-  const ceil = new THREE.MeshStandardMaterial({color:0x9a9186, metalness:0.25, roughness:0.7, envMapIntensity:1.2});
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(20.4,0.28,9.2), dark);
-  roof.position.set(0,4.6,-3.0); roof.castShadow=true; g.add(roof);
-  const ceilPanel = new THREE.Mesh(new THREE.PlaneGeometry(20.0,8.8), ceil);
-  ceilPanel.rotation.x=Math.PI/2; ceilPanel.position.set(0,4.455,-3.0); g.add(ceilPanel);
-  // ceiling cross beams for structure detail
-  for(let i=0;i<5;i++){
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(20.0,0.16,0.16), steel);
-    beam.position.set(0,4.34,-6.9+i*1.95); g.add(beam);
-  }
-  // fascia LED strips (front + back edges)
-  for(const z of [0.62, -6.7]){
-    const s = new THREE.Mesh(new THREE.BoxGeometry(20.0,0.06,0.10), led);
-    s.position.set(0,4.42,z); g.add(s);
-    const w = new THREE.Mesh(new THREE.BoxGeometry(20.0,0.05,0.06), ledW);
-    w.position.set(0,4.30,z); g.add(w);
-  }
-  // pillars
-  for(const x of [-9.6, 9.6]) for(const z of [0.4,-6.4]){
-    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.11,0.13,4.45,20), steel);
-    p.position.set(x,2.22,z); p.castShadow=true; g.add(p);
-    const bp = new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.26,0.12,20), steel);
-    bp.position.set(x,0.06,z); g.add(bp);
-  }
-  // solar panels on roof, tilted
-  for(let i=0;i<6;i++){
-    const sp = new THREE.Mesh(new THREE.BoxGeometry(3.1,0.05,8.2), solar);
-    sp.position.set(-8.3+i*3.3, 4.85, -3.0); sp.rotation.x=THREE.MathUtils.degToRad(6);
-    sp.castShadow=true; g.add(sp);
-    // frame
-    const fr = new THREE.Mesh(new THREE.BoxGeometry(3.2,0.07,0.08), steel);
-    fr.position.set(-8.3+i*3.3, 4.85, -7.0); fr.rotation.x=THREE.MathUtils.degToRad(6); g.add(fr);
-  }
-  // downlights under roof lighting each bay
-  const lamps=[];
-  for(let i=0;i<4;i++){
-    const x=-6.6+i*4.4;
-    const hous = new THREE.Mesh(new THREE.BoxGeometry(1.6,0.07,0.3), dark); hous.position.set(x,4.44,-3.0); g.add(hous);
-    const lens = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.22), new THREE.MeshStandardMaterial({color:0x101418, emissive:0xffc890, emissiveIntensity:1.5})); lens.rotation.x=Math.PI/2; lens.position.set(x,4.4,-3.0); g.add(lens);
-    const emit = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.22), new THREE.MeshBasicMaterial({color:0xc9b69c}));
-    emit.rotation.x=Math.PI/2; emit.position.set(x,4.40,-3.0); g.add(emit);
-    const sp = new THREE.SpotLight(0xffe3bd, 30, 12, Math.PI/3.4, 0.75, 1.7);
-    sp.position.set(x,4.4,-3.0); sp.target.position.set(x,0,-3.0);
-    sp.castShadow=false; g.add(sp); g.add(sp.target); lamps.push(sp);
-    const cone=new THREE.Mesh(new THREE.ConeGeometry(1.15,3.9,32,1,true), new THREE.MeshBasicMaterial({color:0xffe0b8,transparent:true,opacity:0.0,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,visible:false}));
-    cone.position.set(x,2.2,-3.0); g.add(cone);
-  }
-  return {g, lamps};
-}
-const canopy = buildCanopy(); scene.add(canopy.g);
-
-// big glowing price sign
-function buildSign(){
-  const g=new THREE.Group();
-  const steel=new THREE.MeshStandardMaterial({color:0x24272c,metalness:0.9,roughness:0.4});
-  const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.11,5.4,16),steel); pole.position.set(0,2.7,0); pole.castShadow=true; g.add(pole);
-  // screen canvas texture
-  const c=document.createElement('canvas'); c.width=512;c.height=256;
-  const g2=c.getContext('2d');
-  function drawSign(price){
-    g2.fillStyle='#02060c'; g2.fillRect(0,0,512,256);
-    g2.strokeStyle='#123a52'; g2.lineWidth=6; g2.strokeRect(3,3,506,250);
-    g2.fillStyle='#59e6ff'; g2.font='700 40px Segoe UI, Arial'; g2.fillText('⚡ CHARGE BAY',26,58);
-    g2.fillStyle='#ffd166'; g2.font='700 64px Segoe UI, Arial'; g2.fillText(price.toFixed(1)+'¢',26,150);
-    g2.fillStyle='#8aa8bd'; g2.font='400 26px Segoe UI, Arial'; g2.fillText('350 kW  SUPERCHARGE',26,196);
-    g2.fillStyle='#69f0a0'; g2.fillText('OPEN  24 / 7',26,232);
-    tex.needsUpdate=true;
-  }
-  const tex=new THREE.CanvasTexture(c); tex.colorSpace=THREE.SRGBColorSpace;
-  const board=new THREE.Mesh(new THREE.BoxGeometry(3.4,1.8,0.14), steel);
-  board.position.set(0,5.4,0); board.castShadow=true; g.add(board);
-  const face=new THREE.Mesh(new THREE.PlaneGeometry(3.2,1.64), new THREE.MeshBasicMaterial({map:tex}));
-  face.position.set(0,5.4,0.075); g.add(face);
-  // rim glow
-  const rim=new THREE.Mesh(new THREE.BoxGeometry(3.5,1.9,0.05), new THREE.MeshStandardMaterial({color:0x001122,emissive:0x2288ff,emissiveIntensity:3}));
-  rim.position.set(0,5.4,-0.03); g.add(rim);
-  drawSign(12.4);
-  g.position.set(14.5,0,2.2); g.rotation.y=-0.35;
-  return {g, drawSign};
-}
-const sign = buildSign(); scene.add(sign.g);
-
-function backdrop(){
-  const g=new THREE.Group();
-  const ft = facadeTex();
-  for(let i=0;i<26;i++){
-    const a=Math.random()*Math.PI*2, r=70+Math.random()*110;
-    const h=6+Math.random()*38, w=6+Math.random()*14;
-    const tex = ft.clone(); tex.needsUpdate=true; tex.repeat.set(Math.max(1,Math.round(w/4)), Math.max(1,Math.round(h/6)));
-    const warm=[0x8a7f70,0x77685c,0x948a7c,0x6b5f54][i%4];
-    const bmat=new THREE.MeshStandardMaterial({map:tex, color:warm, roughness:0.85, metalness:0.05, emissiveMap: tex, emissive:0xffb878, emissiveIntensity:0.55});
-    const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,8+Math.random()*10), bmat);
-    b.position.set(Math.cos(a)*r, h/2, Math.sin(a)*r); b.rotation.y=Math.random()*Math.PI; g.add(b);
-  }
-  return g;
-}
-scene.add(backdrop());
-
-// curbs + planters + trees to break the asphalt expanse
-function curbsTrees(){
-  const g=new THREE.Group();
-  const conc=new THREE.MeshStandardMaterial({color:0x4b4e54, roughness:0.92, metalness:0.05});
-  const soil=new THREE.MeshStandardMaterial({color:0x241c14, roughness:1.0});
-  const foliage=new THREE.MeshStandardMaterial({color:0x1d3a1e, roughness:0.9});
-  const trunk=new THREE.MeshStandardMaterial({color:0x2e2118, roughness:0.9});
-  // long curb along road edge
-  const curb=new THREE.Mesh(new THREE.BoxGeometry(46,0.18,0.5), conc); curb.position.set(0,0.09,8.2); curb.receiveShadow=true; g.add(curb);
-  // planter islands between bays — real props placed in loadProps; low soil mound here
-  for(const x of [-4.4,0,4.4]){
-    const pl=new THREE.Mesh(new THREE.BoxGeometry(1.15,0.24,5.4), conc); pl.position.set(x,0.12,-2.4); pl.receiveShadow=true; g.add(pl);
-    const sl=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.05,5.2), soil); sl.position.set(x,0.25,-2.4); g.add(sl);
-  }
-  // tree line distant
-  for(let i=0;i<18;i++){
-    const x=-34+i*4+Math.random()*2;
-    const tr=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.18,2.2,8), trunk); tr.position.set(x,1.1,10.5+Math.random()*2); g.add(tr);
-    const lv=new THREE.Mesh(new THREE.ConeGeometry(1.1,3.2,8), foliage); lv.position.set(x,3.4,10.5); g.add(lv);
-  }
-  return g;
-}
-scene.add(curbsTrees());
-
-// low guard rail along road edge + road
-const guard = new THREE.Group();
-{
-  const steel=new THREE.MeshStandardMaterial({color:0x9aa0a6, metalness:1.0, roughness:0.45});
-  // rails with a lot entrance gap (cars reverse out through it)
-  for(const [x0,x1] of [[-30,-9],[9,30]]){
-    const rail=new THREE.Mesh(new THREE.BoxGeometry(x1-x0,0.14,0.05), steel); rail.position.set((x0+x1)/2,0.72,9.5); rail.castShadow=true; guard.add(rail);
-    const n=Math.max(1,Math.floor((x1-x0)/3.2));
-    for(let i=0;i<=n;i++){
-      const x=x0+i*((x1-x0)/n);
-      const post=new THREE.Mesh(new THREE.BoxGeometry(0.09,0.72,0.09), steel); post.position.set(x,0.36,9.5); guard.add(post);
-    }
-  }
-  // bollards flanking the entrance gap
-  const boll=new THREE.MeshStandardMaterial({color:0xc8b432, metalness:0.6, roughness:0.5, emissive:0x201800, emissiveIntensity:0.4});
-  for(const x of [-9.4,9.4]){ const bo=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.09,0.8,10), boll); bo.position.set(x,0.4,9.5); guard.add(bo); }
-  // road beyond guard
-  const road=new THREE.Mesh(new THREE.PlaneGeometry(80,9), new THREE.MeshStandardMaterial({color:0x101216, roughness:0.6, metalness:0.2, envMapIntensity:1.2}));
-  road.rotation.x=-Math.PI/2; road.position.set(0,0.008,14.5); road.receiveShadow=true; guard.add(road);
-  const dash=new THREE.MeshStandardMaterial({color:0xd8c84a, roughness:0.5, emissive:0x201d08, emissiveIntensity:0.5});
-  for(let i=0;i<14;i++){ const d=new THREE.Mesh(new THREE.PlaneGeometry(2.4,0.14), dash); d.rotation.x=-Math.PI/2; d.position.set(-30+i*4.6,0.014,14.5); guard.add(d); }
-}
-scene.add(guard);
 
 // ---------------- assets: chargers & cars ----------------
 const loader = new GLTFLoader();
@@ -1387,7 +1082,7 @@ function animate(){
   // day rollover at 00:00
   if(gameClock>=24*60){ gameClock-=24*60; endDay(); }
   priceEl.textContent = (spotPrice*100).toFixed(1)+'¢/kWh';
-  sign.drawSign(spotPrice*100);
+  WORLD.sign.drawSign(spotPrice*100);
   // (fog density driven by day/night line above)
 
   // wet shimmer: drift asphalt normal UVs while raining
@@ -1420,8 +1115,8 @@ function animate(){
   // camera lens droplets overlay
   const sheltered = camera.position.x>-10.2 && camera.position.x<10.2 && camera.position.z>-7.6 && camera.position.z<1.6;
   if(lensFx){ const eff= raining*(sheltered?0.12:1.15); lensFx.style.opacity = Math.min(1, eff); raining>0.05 && !sheltered && lensDrip(dt); }
-  let wx = nightK>0.82? 'Clear night' : (nightK>0.25? 'Dusk' : 'Clear');
-  if(raining>0.4) wx = nightK>0.82? 'Rainy night' : nightK>0.25? 'Rainy dusk' : 'Light rain';
+  let wx = ATMO.nightK>0.82? 'Clear night' : (ATMO.nightK>0.25? 'Dusk' : 'Clear');
+  if(raining>0.4) wx = ATMO.nightK>0.82? 'Rainy night' : ATMO.nightK>0.25? 'Rainy dusk' : 'Light rain';
   if(now<coldUntil) wx = raining>0.4? 'Freezing rain' : 'Cold snap';
   if(raining>0.4 && sheltered) wx += ' · dry under canopy';
   if(now<brownUntil) wx += ' + Brownout';
@@ -1609,7 +1304,7 @@ try{
   composer.addPass(ssao);
 }catch(e){ console.warn('ssao unavailable', e); }
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 0.12, 0.45, 0.95);
-bloomPass = bloom;
+ATMO.setBloom(bloom);
 composer.addPass(bloom);
 const FinalFX = {
   uniforms:{ tDiffuse:{value:null}, time:{value:0}, aberr:{value:0.0006}, grain:{value:0.006}, vign:{value:0.24} },
@@ -1653,9 +1348,9 @@ addEventListener('keydown', e=>{ if(e.code==='KeyG'){ const order=['auto','high'
 // diagnostics for capture harness
 const diag={ fps:0, calls:()=>renderer.info.render.calls, tris:()=>renderer.info.render.triangles };
 window.__GAME = {
-  diag, bays:()=>bays.map(b=>({state:b.state, batt:b.car?b.car.userData.battery:null})),
+  diag, bays:()=>bays.map(b=>({state:b.state, batt:b.car?b.car.userData.battery:null, vip:b.car?!!b.car.userData.vip:false})),
   carMats(){ const out=[]; const car=carProtos[0]; if(!car) return out; const seen=new Set(); car.traverse(o=>{ if(o.isMesh&&o.material){ const ms=Array.isArray(o.material)?o.material:[o.material]; for(const m of ms){ if(seen.has(m.uuid))continue; seen.add(m.uuid); out.push({name:m.name,metal:m.metalness,rough:m.roughness,env:m.envMapIntensity,cc:m.clearcoat!==undefined?m.clearcoat:null,color:m.color?m.color.getHexString():null}); } } }); return out; },
-  ready:()=>ready, envReady:()=>envReady,
+  ready:()=>ready, envReady:()=>ATMO.envReady,
   carBoxes(){ const out=[]; for(const b of bays){ if(b.car){ const bb=new THREE.Box3().setFromObject(b.car); out.push({bay:b.x, state:b.state, min:bb.min.toArray().map(v=>+v.toFixed(2)), max:bb.max.toArray().map(v=>+v.toFixed(2))}); } } return out; },
   pose(x,y,z,ry,rx){ camera.position.set(x,y,z); camera.rotation.set(rx||0,ry,0); },
   lookAt(x,y,z,dist,up){ const c=camera.position; const d=new THREE.Vector3(x-c.x,y-c.y,z-c.z); d.normalize(); const p=c.clone().addScaledVector(d,-(dist||6)); camera.position.copy(p); const yaw=Math.atan2(-(x-p.x),-(z-p.z)); camera.rotation.set(0,yaw,0); },
@@ -1663,13 +1358,14 @@ window.__GAME = {
   serve(){ served+=1; },
   setClock(h){ gameClock=h*60; },
   weather(v){ raining=Math.max(0,Math.min(1,v)); },
+  wx(){ return {raining:+raining.toFixed(2), cold: performance.now()<coldUntil, brown: performance.now()<brownUntil, cap: brownCap, vipPending}; },
   event(name){ const t=performance.now();
     if(name==='cold'){ coldUntil=t+60000; return 'cold'; }
     if(name==='brown'){ brownUntil=t+45000; brownCap=500; return 'brown'; }
     if(name==='vip'){ vipPending=true; vipSpawned=false; return 'vip'; }
     if(name==='rain'){ raining=0.8; return 'rain'; } return 'none'; },
   forceArr(i,vip){ const b=bays[i]; if(b.state!=='empty') return 'busy'; spawnCar(b,false,!!vip); return 'ok'; },
-  info(){ return {nightK:+nightK.toFixed(3), clock:Math.floor(gameClock), protos:carProtos.length, fixtures:nightFixtures.length}; },
+  info(){ return {nightK:+ATMO.nightK.toFixed(3), clock:Math.floor(gameClock), protos:carProtos.length, fixtures:nightFixtures.length}; },
   camPos(){ return {x:+camera.position.x.toFixed(2), y:+camera.position.y.toFixed(2), z:+camera.position.z.toFixed(2)}; },
   setBatt(i,v){ if(bays[i].car){ bays[i].car.userData.battery=v; return 'ok'; } return 'nocar'; },
   q(){ return {mode:Q.mode, fps:diag.fps, pxr:renderer.getPixelRatio?+renderer.getPixelRatio().toFixed(2):null}; },
