@@ -852,7 +852,7 @@ function spinWheels(car, dt){
   const ud=car.userData; if(!ud.wheelPivots) buildWheelRig(car);
   const dz = car.position.z - (ud.prevZ!==undefined?ud.prevZ:car.position.z); ud.prevZ=car.position.z;
   if(Math.abs(dz)<1e-4) return;
-  for(const g of ud.wheelPivots) g.rotation.x -= dz/g.userData.r;   // local X = axle (cars face -Z at yaw PI)
+  for(const g of ud.wheelPivots) g.rotation.x += dz/g.userData.r;   // forward = -Z; top of wheel must travel -Z
 }
 function steerTilt(car, amt){
   const ud=car.userData; if(!ud.steerMeshes) return;
