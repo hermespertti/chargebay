@@ -793,30 +793,12 @@ const carReflTexWarm = (function(){
 
 // ---------------- loop ----------------
 let last=performance.now(), fpsAcc=0, fpsN=0, fpsVal=60;
-function animate(){
-  requestAnimationFrame(animate);
-  const now=performance.now(); const dt=Math.min(0.05,(now-last)/1000); last=now;
-  fpsAcc+=1/dt; fpsN++; if(fpsN>=30){ fpsVal=fpsAcc/fpsN; fpsAcc=0; fpsN=0; diag.fps=Math.round(fpsVal);
-    if(Q.mode==='auto' && !autoDropped && diag.fps<28){ autoLowT++; if(autoLowT>=3){ autoDropped=true; qApply('low'); toast('\u2699 Auto: LOW (press G to cycle quality)'); } } else if(diag.fps>=45){ autoLowT=0; } }
-
-  updatePlayer(dt);
-
-  ECONOMY.tick(dt, now);
-  COACH.tick();
-  WEATHER.events(now);
-  const cold = now<sim.coldUntil;
-  // (fog density driven by day/night line above)
-
-  WEATHER.tick(dt, now);
-  let maxSpd=0;
-  for(const b of sim.bays){ if(b.car){ wetUpdate(b.car, dt, performance.now()); maxSpd=Math.max(maxSpd, b.car.userData.speed||0); b.car.userData.speed=0; } }
-  SFX.setTire(Math.min(1, maxSpd/9));
-
-  const totalKw = BAYSYS.tick(dt, now);
-    if(cashEl){ cashEl.textContent='$'+sim.cash.toFixed(2); cashEl.className = sim.cash>=0?'good':'bad'; }
+// ---------------- HUD / prompt sync ----------------
+function hudSync(now){
+  if(cashEl){ cashEl.textContent='$'+sim.cash.toFixed(2); cashEl.className = sim.cash>=0?'good':'bad'; }
   if(dayEl) dayEl.textContent=sim.day;
   const repEl=document.getElementById('rep');
-  if(repEl && performance.now()-ECONOMY.repFlashT>2600){ repEl.textContent='★ '+Math.round(sim.rep); repEl.className = sim.rep>=70?'good':(sim.rep>=40?'':'bad'); }
+  if(repEl && now-ECONOMY.repFlashT>2600){ repEl.textContent='★ '+Math.round(sim.rep); repEl.className = sim.rep>=70?'good':(sim.rep>=40?'':'bad'); }
   if(bufEl) bufEl.textContent = (sim.bufferOwned? Math.round(sim.bufferKwh)+' / '+sim.BUFFER_CAP+' kWh':'—') + (sim.solarLast>0.02? ' · ☀ '+Math.round(sim.solarLast*sim.SOLAR_CAP_KW)+' kW':'');
   revEl.textContent = '$'+sim.revenue.toFixed(2);
   { const sp=document.getElementById('sellp'); if(sp){ sp.textContent=Math.round(sellPrice()*100)+'¢/kWh'; sp.className = sim.sellMarkup>2.4?'bad':(sim.sellMarkup<1.5?'warn':'good'); } }
@@ -838,7 +820,31 @@ function animate(){
     else { tEEl.textContent='E'; tREl.textContent='⚡'; }
   }
   else promptEl.classList.remove('show');
+}
 
+// ---------------- game tick: ordered subsystem update ----------------
+const game = {
+  tick(dt, now){
+    // fps governor (auto-quality)
+    fpsAcc+=1/dt; fpsN++; if(fpsN>=30){ fpsVal=fpsAcc/fpsN; fpsAcc=0; fpsN=0; diag.fps=Math.round(fpsVal);
+      if(Q.mode==='auto' && !autoDropped && diag.fps<28){ autoLowT++; if(autoLowT>=3){ autoDropped=true; qApply('low'); toast('\u2699 Auto: LOW (press G to cycle quality)'); } } else if(diag.fps>=45){ autoLowT=0; } }
+    updatePlayer(dt);
+    ECONOMY.tick(dt, now);
+    COACH.tick();
+    WEATHER.events(now);
+    WEATHER.tick(dt, now);
+    let maxSpd=0;
+    for(const b of sim.bays){ if(b.car){ wetUpdate(b.car, dt, now); maxSpd=Math.max(maxSpd, b.car.userData.speed||0); b.car.userData.speed=0; } }
+    SFX.setTire(Math.min(1, maxSpd/9));
+    BAYSYS.tick(dt, now);
+    hudSync(now);
+  }
+};
+
+function animate(){
+  requestAnimationFrame(animate);
+  const now=performance.now(); const dt=Math.min(0.05,(now-last)/1000); last=now;
+  game.tick(dt, now);
   finalPass.uniforms.time.value = now/1000;
   composer.render();
 }
