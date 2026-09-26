@@ -45,6 +45,25 @@
   #tE{bottom:110px;} #tR{bottom:24px; right:110px;} #tM{bottom:110px; right:110px; width:48px; height:48px; font-size:16px; opacity:.85;}
   #lensfx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:0;mix-blend-mode:screen;transition:opacity 1.2s;}
   #tech{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(4,8,14,.55);z-index:14;}
+  #goals{position:absolute;top:12px;right:12px;background:rgba(6,12,20,.72);border:1px solid rgba(80,200,255,.25);border-radius:10px;padding:10px 14px;font:12px/1.5 'Segoe UI',sans-serif;color:#cfe6ff;z-index:5;backdrop-filter:blur(6px);min-width:190px;}
+  #goals h3{margin:0 0 6px;font-size:12px;letter-spacing:.12em;color:#7fd4ff;}
+  #goals .g{display:flex;justify-content:space-between;gap:10px;padding:2px 0;}
+  #goals .g.done{color:#79f2a8;text-decoration:line-through;opacity:.85;}
+  #goals .g b{color:#ffd166;font-weight:600;}
+  #goals .g.done b{color:#79f2a8;}
+  #streak{margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.12);font-size:11px;color:#9db8d4;}
+  #daycard{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(3,6,12,.78);z-index:16;}
+  #daycardbox{background:linear-gradient(160deg,#0c1622,#0a1018);border:1px solid rgba(80,200,255,.35);border-radius:16px;padding:26px 34px;min-width:340px;color:#e8f4ff;font:14px/1.6 'Segoe UI',sans-serif;box-shadow:0 0 60px rgba(0,120,200,.25);text-align:center;}
+  #daycardbox h2{margin:0 0 14px;font-size:22px;letter-spacing:.06em;color:#ffd166;}
+  #dcStats{text-align:left;margin:0 auto 14px;max-width:300px;}
+  #dcStats .row{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.06);}
+  #dcStats .row b.good{color:#79f2a8;} #dcStats .row b.bad{color:#ff7a6e;}
+  #dcGoals{text-align:left;margin:0 auto 12px;max-width:300px;}
+  #dcGoals .g{padding:2px 0;}
+  #dcGoals .g.done::before{content:'✅ ';} #dcGoals .g.fail::before{content:'❌ ';}
+  #dcStreak{font-size:13px;color:#7fd4ff;margin-bottom:16px;}
+  #dcBtn{background:linear-gradient(90deg,#0a84ff,#38bdf8);border:none;border-radius:8px;color:#02121f;font-weight:700;font-size:14px;padding:10px 22px;cursor:pointer;letter-spacing:.05em;}
+  #dcBtn:hover{filter:brightness(1.15);}
   #techbox{background:rgba(8,14,22,.94);border:1px solid rgba(120,220,255,.35);border-radius:14px;padding:20px 26px;width:min(560px,92vw);max-height:86vh;overflow:auto;}
   #techbox h2{margin:0 0 12px;font-size:15px;letter-spacing:.18em;color:#8fe3ff;}
   .tcard{display:flex;align-items:center;gap:14px;padding:10px 12px;margin:8px 0;border:1px solid rgba(120,180,220,.18);border-radius:10px;background:rgba(16,26,38,.6);}
@@ -103,6 +122,14 @@
     <div class="row"><span>Rep</span><b id="rep">★ 60</b></div>
   </div>
   <div id="prompt">Press <b>E</b></div>
+  <div id="goals"><h3>📋 TODAY'S GOALS</h3><div id="goallist"></div><div id="streak"></div></div>
+  <div id="daycard"><div id="daycardbox">
+    <h2 id="dcTitle">🌙 DAY 1 COMPLETE</h2>
+    <div id="dcStats"></div>
+    <div id="dcGoals"></div>
+    <div id="dcStreak"></div>
+    <button id="dcBtn">START NEXT DAY →</button>
+  </div></div>
   <div id="crosshair"></div>
   <div id="toast"></div>
   <div id="tech">

@@ -755,6 +755,8 @@ async function loadAssets(){
   }catch(e){ console.warn('ferrari skipped', e && e.message); }
   collectNightLights();
   if(!loadGame()){ bays[3].locked=true; }
+  if(!goals.length) rollGoals(); paintGoals();
+  document.getElementById('dcBtn').addEventListener('click',()=>{ hideDayCard(); if(!isTouch&&controls.isLocked===false) controls.lock(); });
   applyLocked();
   if(bufferOwned) addBuffer();
   bays.forEach(b=>{ if(!b.locked){ spawnCar(b, true); b.nextArrT = performance.now()+4000+Math.random()*5000; } });
@@ -840,8 +842,9 @@ function spawnCar(bay, instant=false, vip=false, seg=null){
   car.userData = { battery: roll, need: vip? 0.95 : 0.72+Math.random()*0.25, patience: vip? 75 : seg.patience[0]+Math.random()*(seg.patience[1]-seg.patience[0]), arrived: performance.now(), vip, seg, packKwh: seg.pack };
   if(seg.paint){ car.traverse(o=>{ if(o.isMesh&&o.material&&o.material.name&&(o.material.name.toLowerCase().includes('paint')||o.material.name.toLowerCase().includes('body_color'))){ o.material=o.material.clone(); o.material.color.setHex(seg.paint); if(seg.id==='taxi'){ o.material.metalness=0.35; o.material.roughness=0.3; } } }); }
   if(seg.id==='taxi' && !vip){
+    const bb=new THREE.Box3().setFromObject(car); const roofY=bb.max.y;
     const sign=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.16,0.24), new THREE.MeshStandardMaterial({color:0xffe14d, emissive:0xcaa100, emissiveIntensity:1.4, roughness:0.4}));
-    sign.position.set(0,1.62,0.1); car.add(sign);
+    sign.position.set(0,roofY+0.09,0.1); car.add(sign);
   }
   bay.segName = seg.name; bay.segFee = seg.fee;
   car.position.set(bay.x, 0, instant? -3.1 : 16 + Math.random()*6);
@@ -1193,6 +1196,38 @@ function currentTarget(){
   return null;
 }
 
+// ---- daily goals + streak retention ----
+const GOAL_POOL=[
+  { id:'serve', make:d=>({label:'Serve '+(6+d*2)+' customers', target:6+d*2, key:'served', reward:40+d*10}), },
+  { id:'profit', make:d=>({label:'Earn $'+(50+d*20)+' profit', target:50+d*20, key:'profit', reward:50+d*12}), },
+  { id:'nokick', make:d=>({label:'Zero angry customers', target:1, key:'noKick', reward:60}), },
+  { id:'vip', make:d=>({label:'Handle a VIP', target:1, key:'vipDone', reward:45}), },
+  { id:'fast', make:d=>({label:'3 fast charges (<90s)', target:3, key:'fast', reward:55}), },
+  { id:'kwh', make:d=>({label:'Deliver '+(150+d*40)+' kWh', target:150+d*40, key:'kwh', reward:45+d*8}), },
+];
+let goals=[], dayStats={served:0, profit:0, kicks:0, vipDone:0, fast:0, kwh:0}, streak=0;
+function rollGoals(){
+  goals = GOAL_POOL.map((g,i)=>({ ...g.make(day), done:false, claimed:false, id:g.id }));
+  // deterministic pick of 3 by day
+  const picks=[]; let h=day*2654435761>>>0;
+  while(picks.length<3){ h=(h*1103515245+12345)>>>0; const idx=h%GOAL_POOL.length; if(!picks.includes(idx)) picks.push(idx); }
+  goals = picks.map(i=>({ ...GOAL_POOL[i].make(day), done:false, claimed:false, id:GOAL_POOL[i].id }));
+  dayStats={served:0, profit:0, kicks:0, vipDone:0, fast:0, kwh:0};
+}
+function bumpGoal(key, amt){
+  dayStats[key]=(dayStats[key]||0)+(amt||1);
+  for(const g of goals){ if(!g.done && g.key===key && dayStats[g.key]>=g.target){ g.done=true; SFX.chime(880,1320); toast('📋 Goal complete: '+g.label+' · <b>+$'+g.reward+'</b> rep +2'); cash+=g.reward; repAdd(2); } }
+  paintGoals();
+}
+function paintGoals(){
+  const el=document.getElementById('goallist'); if(!el) return;
+  el.innerHTML = goals.map(g=>{
+    let cur=g.key==='noKick' ? (dayStats.kicks===0?1:0) : Math.min(dayStats[g.key]||0, g.target);
+    return '<div class="g'+(g.done?' done':'')+'"><span>'+g.label+'</span><b>'+cur+'/'+g.target+'</b></div>';
+  }).join('');
+  const st=document.getElementById('streak');
+  if(st) st.textContent = streak>0 ? '🔥 '+streak+'-day profit streak' : '🔥 Keep a profit streak going';
+}
 function paySession(b){
   if((b.chargeKwh||0)>0.05){
     served++; servedTotal++;
@@ -1203,12 +1238,15 @@ function paySession(b){
     const segN=(b.car&&b.car.userData.seg&&b.car.userData.seg.name)||'Car';
     repAdd( (b.car&&b.car.userData.vip)?2.5:1 );
     toast((b.car&&b.car.userData.vip?'👑 VIP tip +$'+fee.toFixed(2)+' · ':'')+'🎉 '+segN+' complete +$'+b.sessionRev.toFixed(2)+' · profit <b>$'+prof.toFixed(2)+'</b>');
+    bumpGoal('served',1); bumpGoal('profit',prof); bumpGoal('kwh',(b.chargeKwh||0));
+    if(b.car&&b.car.userData.vip) bumpGoal('vipDone',1);
+    if((performance.now()-(b.chargeStartT||performance.now()))<90000 && (b.chargeKwh||0)>25) bumpGoal('fast',1);
   }
   b.sessionRev=0; b.sessionCost=0;
 }
 function saveGame(){
   try{
-    const d={ v:1, cash, day, dayRev, dayCost, servedTotal, bufferOwned, bufferKwh, rep, techOwned,
+    const d={ v:1, cash, day, dayRev, dayCost, servedTotal, bufferOwned, bufferKwh, rep, techOwned, goals, dayStats, streak,
       bays: bays.map(b=>({ tier:b.tier, locked:!!b.locked, sell:b.sell })), raining, gameClock, spotPrice, ts:Date.now(),
       vipPending, coldLeft: Math.max(0,coldUntil-performance.now()), brownLeft: Math.max(0,brownUntil-performance.now()), brownCap, solarKwh };
     localStorage.setItem(SAVE_KEY, JSON.stringify(d));
@@ -1221,20 +1259,47 @@ function loadGame(){
     cash=d.cash??cash; day=d.day??day; dayRev=d.dayRev||0; dayCost=d.dayCost||0; servedTotal=d.servedTotal||0;
     bufferOwned=!!d.bufferOwned; bufferKwh=d.bufferKwh||0; raining=d.raining??raining; gameClock=d.gameClock??gameClock; spotPrice=d.spotPrice??spotPrice; rep=d.rep??rep; techOwned=d.techOwned||{};
     if(Array.isArray(d.bays)) d.bays.forEach((sb,i)=>{ if(bays[i]){ bays[i].tier=sb.tier||0; bays[i].locked=!!sb.locked; bays[i].sell=sb.sell||0.25; bays[i].kw=TIERS[bays[i].tier].kw; } });
-    vipPending=!!d.vipPending; brownCap=d.brownCap||500; solarKwh=d.solarKwh||0;
+    vipPending=!!d.vipPending; brownCap=d.brownCap||500; solarKwh=d.solarKwh||0; streak=d.streak||0; if(Array.isArray(d.goals)&&d.goals.length) goals=d.goals; if(d.dayStats) dayStats=d.dayStats;
     coldUntil=performance.now()+(d.coldLeft||0); brownUntil=performance.now()+(d.brownLeft||0);
     if(bufferOwned) addBuffer();
     return true;
   }catch(e){ return false; }
 }
 function endDay(){
+  const profit=dayRev-dayCost;
+  const made=goals.filter(g=>g.done).length;
+  const allDone = goals.length && made===goals.length;
+  if(profit>0){ streak++; } else { streak=0; }
+  let bonus=0; if(allDone){ bonus=100; cash+=bonus; repAdd(4); }
+  showDayCard(day, dayRev, dayCost, profit, made, bonus);
   day++;
   repAdd(3); // overnight goodwill recovery
-  const profit=dayRev-dayCost;
-  showDaySummary(day-1, dayRev, dayCost, profit);
   dayRev=0; dayCost=0;
+  rollGoals(); paintGoals();
   saveGame();
 }
+function showDayCard(d,rev,cost,profit,made,bonus){
+  daySummaryT=performance.now();
+  const card=document.getElementById('daycard'); if(!card){ showDaySummary(d,rev,cost,profit); return; }
+  document.getElementById('dcTitle').textContent='🌙 DAY '+d+' COMPLETE';
+  const ok=profit>=0;
+  document.getElementById('dcStats').innerHTML=
+    '<div class="row"><span>Revenue</span><b class="good">$'+rev.toFixed(2)+'</b></div>'+
+    '<div class="row"><span>Energy cost</span><b class="bad">−$'+cost.toFixed(2)+'</b></div>'+
+    '<div class="row"><span>Profit</span><b class="'+(ok?'good':'bad')+'">'+(ok?'$':'−$')+Math.abs(profit).toFixed(2)+'</b></div>'+
+    '<div class="row"><span>Customers served</span><b>'+dayStats.served+'</b></div>'+
+    '<div class="row"><span>kWh delivered</span><b>'+Math.round(dayStats.kwh)+'</b></div>'+
+    (dayStats.kicks?'<div class="row"><span>Angry walkouts</span><b class="bad">'+dayStats.kicks+'</b></div>':'')+
+    (bonus?'<div class="row"><span>All-goals bonus</span><b class="good">+$'+bonus+'</b></div>':'');
+  document.getElementById('dcGoals').innerHTML='<h3 style="margin:8px 0 4px;font-size:12px;letter-spacing:.12em;color:#7fd4ff">GOALS '+made+'/'+goals.length+'</h3>'+
+    goals.map(g=>'<div class="g '+(g.done?'done':'fail')+'">'+g.label+'</div>').join('');
+  document.getElementById('dcStreak').textContent = streak>0 ? '🔥 '+streak+'-day profit streak · next bonus at '+(streak+1)+'d' : '😬 Streak reset — stay profitable tomorrow';
+  card.style.display='flex';
+  if(window.__GAME) window.__GAME._cardOpen=true;
+  try{ if(document.pointerLockElement) document.exitPointerLock(); }catch(e){}
+  SFX.chime(660,990);
+}
+function hideDayCard(){ const c=document.getElementById('daycard'); if(c) c.style.display='none'; if(window.__GAME) window.__GAME._cardOpen=false; }
 let daySummaryT=0;
 function showDaySummary(d,rev,cost,profit){ daySummaryT=performance.now(); toast('🌙 Day '+d+' done · rev $'+rev.toFixed(2)+' · cost $'+cost.toFixed(2)+' · profit <b>$'+profit.toFixed(2)+'</b>'); }
 
@@ -1257,7 +1322,7 @@ function tryInteract(){
     if(b.car){
       const port=bayPort(b);
       if(port.distanceTo(camera.position)<2.2){
-        docked=true; b.plugged=true; b.car.userData.docked=true; b.state='ready';
+        docked=true; b.plugged=true; b.car.userData.docked=true; b.state='ready'; b.chargeStartT=performance.now(); b.chargeKwh=0;
         // GLB ground truth: nozzle tip = local +Y (tip at y .17..21), face-up = local +Z.
         // insert along the car's lateral body normal (through the side port), not toward car center
         const inward=new THREE.Vector3(1,0,0).applyQuaternion(b.car.quaternion); // port is local -X side => into body = car local +X
@@ -1550,7 +1615,7 @@ function animate(){
     // patience: idle parked/held car leaves
     if((b.state==='parked'||b.state==='ready') && b.car && !b.car.userData.docked){
       const waited=(now-b.car.userData.arrived)/1000;
-      if(waited>b.car.userData.patience){ b.state='departing'; SFX.chime(300,220); SFX.departHorn(); repAdd(-(b.car.userData.vip?5:2.5)); toast('😠 '+(b.car.userData.seg?b.car.userData.seg.name:'Car')+' left without charging · rep −'+(b.car.userData.vip?5:2.5)); }
+      if(waited>b.car.userData.patience){ b.state='departing'; SFX.chime(300,220); SFX.departHorn(); repAdd(-(b.car.userData.vip?5:2.5)); dayStats.kicks++; paintGoals(); toast('😠 '+(b.car.userData.seg?b.car.userData.seg.name:'Car')+' left without charging · rep −'+(b.car.userData.vip?5:2.5)); }
     }
   }
   if(totalKw>0) SFX.setCharge(true, totalKw/350); else SFX.setCharge(false);
@@ -1742,6 +1807,10 @@ window.__GAME = {
   loadKw(){ let t=0; for(const b of bays) if(b.state==='charging') t+=b.kw; return t; },
   money(){ return {cash:+cash.toFixed(2), day, dayRev:+dayRev.toFixed(2), dayCost:+dayCost.toFixed(2), bufferKwh:+bufferKwh.toFixed(2), bufferOwned}; },
   save(){ saveGame(); return localStorage.getItem('chargebay_save_v1')? 'saved':'fail'; },
+  endDayNow(){ endDay(); return 'ok'; },
+  cardOpen(){ return !!(window.__GAME&&window.__GAME._cardOpen); },
+  goalsState(){ return {goals, dayStats, streak}; },
+  completeGoal(id){ const g=goals.find(x=>x.id===id); if(g&&!g.done){ dayStats[g.key]=g.target; bumpGoal(g.key,0);} return 'ok'; },
   audio(){ return { active: !!(window.__SFXREF && window.__SFXREF.ctx), muted: SFX.muted }; },
 };
 
