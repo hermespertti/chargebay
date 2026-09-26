@@ -970,7 +970,7 @@ function spawnCar(bay, instant=false, vip=false, seg=null){
   const sz = seg.id==='van'? 1.28 : seg.id==='suv'? 1.12 : seg.id==='taxi'? 1.0 : seg.id==='retro'? 0.94 : 1.0;
   car.scale.multiplyScalar(sz); bay.carScale=sz;
   const roll = vip? 0.03+Math.random()*0.12 : 0.08+Math.random()*0.5;
-  car.userData = { battery: roll, need: vip? 0.95 : 0.72+Math.random()*0.25, patience: vip? 75 : seg.patience[0]+Math.random()*(seg.patience[1]-seg.patience[0]), arrived: performance.now(), vip, seg, packKwh: seg.pack };
+  car.userData = { battery: roll, need: vip? 0.95 : 0.72+Math.random()*0.25, patience: vip? 55 : seg.patience[0]+Math.random()*(seg.patience[1]-seg.patience[0]), arrived: performance.now(), vip, seg, packKwh: seg.pack };
   if(seg.paint){ car.traverse(o=>{ if(o.isMesh&&o.material&&o.material.name&&(o.material.name.toLowerCase().includes('paint')||o.material.name.toLowerCase().includes('body_color'))){ o.material=o.material.clone(); o.material.color.setHex(seg.paint); if(seg.id==='taxi'){ o.material.metalness=0.35; o.material.roughness=0.3; } } }); }
   if(seg.id==='taxi' && !vip){
     const bb=new THREE.Box3().setFromObject(car); const roofY=bb.max.y;
@@ -1053,12 +1053,12 @@ const PACK_KWH = 75; // kWh per full charge
 const TIERS = [ {kw:150,cost:0}, {kw:350,cost:800}, {kw:600,cost:2000} ];
 // ---- car segments: different packs, patience, fees ----
 const SEGMENTS = [
-  { id:'sedan', name:'Sedan',      pack:75,  patience:[150,240], fee:1.00, w:5, paint:null },
-  { id:'taxi',  name:'Taxi',       pack:60,  patience:[55,90],   fee:1.12, w:4, paint:0xf2b705 },
-  { id:'suv',   name:'SUV',        pack:95,  patience:[180,260], fee:0.95, w:3, paint:null },
-  { id:'van',   name:'Delivery van',pack:110,patience:[240,320], fee:0.88, w:2, paint:0xdfe4ea },
-  { id:'retro', name:'Retro classic',pack:40,patience:[120,180], fee:1.35, w:1, paint:0x8a2be2 },
-  { id:'super', name:'Supercar',     pack:105,patience:[80,120],  fee:1.60, w:1, paint:null },
+  { id:'sedan', name:'Sedan',      pack:75,  patience:[95,150],  fee:1.00, w:5, paint:null },
+  { id:'taxi',  name:'Taxi',       pack:60,  patience:[40,65],   fee:1.12, w:4, paint:0xf2b705 },
+  { id:'suv',   name:'SUV',        pack:95,  patience:[115,165], fee:0.95, w:3, paint:null },
+  { id:'van',   name:'Delivery van',pack:110,patience:[160,220], fee:0.88, w:2, paint:0xdfe4ea },
+  { id:'retro', name:'Retro classic',pack:40,patience:[75,110],  fee:1.35, w:1, paint:0x8a2be2 },
+  { id:'super', name:'Supercar',     pack:105,patience:[45,75],  fee:1.60, w:1, paint:null },
 ];
 function pickSegment(){
   const h=Math.floor(gameClock/60);
