@@ -12,6 +12,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { SFX } from './audio.js';
 import { asphaltTextures, asphaltNormal, puddleMaskStatic, blobTex, streakTexture, facadeTex, barPctTex, shadowTex, carReflTexRed } from './textures.js';
+import { CABLE_SEGS, CABLE_LEN, CABLE_RANGE, makeCable, cableStep } from './cable.js';
 
 // ---------------- core ----------------
 const app = document.getElementById('app');
@@ -765,7 +766,7 @@ async function loadPlugs(){
     // port target ring: appears at the car port when this bay's connector is in hand
     const ring=new THREE.Mesh(new THREE.RingGeometry(0.14,0.24,28), new THREE.MeshBasicMaterial({color:0x39e6a8,transparent:true,opacity:0,depthWrite:false,depthTest:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide}));
     ring.renderOrder=9; scene.add(ring); b.portRing=ring;
-    b.cable=makeCable();
+    b.cable=makeCable(scene);
   });
 }
 function bayPort(b){
@@ -910,44 +911,6 @@ let ready=false;
 let grabbedBay=null, docked=false;
 function lerpAng(a,b,k){ let d=(b-a)%(Math.PI*2); if(d>Math.PI)d-=Math.PI*2; if(d<-Math.PI)d+=Math.PI*2; return a+d*k; }
 function lerpDelta(a,b){ let d=(b-a)%(Math.PI*2); if(d>Math.PI)d-=Math.PI*2; if(d<-Math.PI)d+=Math.PI*2; return d; }
-// ---- cable physics (Verlet chain per bay, connector -> port/hand) ----
-const CABLE_SEGS=26, CABLE_LEN=4.2, CABLE_RANGE=4.0;
-function makeCable(){
-  const pts=[], old=[];
-  for(let i=0;i<=CABLE_SEGS;i++){ pts.push(new THREE.Vector3(0,1,-6)); old.push(new THREE.Vector3(0,1,-6)); }
-  const geo=new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(p=>p.clone())), CABLE_SEGS*2, 0.055, 8, false);
-  const mat=new THREE.MeshStandardMaterial({color:0x191e26, roughness:0.55, metalness:0.15});
-  const mesh=new THREE.Mesh(geo,mat); mesh.castShadow=true; mesh.frustumCulled=false; scene.add(mesh);
-  return {pts, old, mesh, geo};
-}
-function cableStep(cab, a, b, dt){
-  // verlet: gravity + constraint solve, endpoints pinned to a(bay end) and b(plug end)
-  const g=-9.8*dt*dt;
-  for(let i=1;i<CABLE_SEGS;i++){
-    const p=cab.pts[i], o=cab.old[i];
-    const vx=(p.x-o.x)*0.985, vy=(p.y-o.y)*0.985, vz=(p.z-o.z)*0.985;
-    o.copy(p); p.x+=vx; p.y+=vy+g; p.z+=vz;
-    // collide with car body as rough box while docked
-    if(p.y<0.06) p.y=0.06;
-  }
-  const rest=CABLE_LEN/CABLE_SEGS;
-  for(let k=0;k<8;k++){
-    cab.pts[0].copy(a); cab.pts[CABLE_SEGS].copy(b);
-    for(let i=0;i<CABLE_SEGS;i++){
-      const p0=cab.pts[i], p1=cab.pts[i+1];
-      let dx=p1.x-p0.x, dy=p1.y-p0.y, dz=p1.z-p0.z;
-      const d=Math.sqrt(dx*dx+dy*dy+dz*dz)||1e-6;
-      const diff=(d-rest)/d*0.5;
-      if(i!==0){ p0.x+=dx*diff; p0.y+=dy*diff; p0.z+=dz*diff; }
-      if(i+1!==CABLE_SEGS){ p1.x-=dx*diff; p1.y-=dy*diff; p1.z-=dz*diff; }
-    }
-  }
-  cab.pts[0].copy(a); cab.pts[CABLE_SEGS].copy(b);
-  // rebuild tube geometry
-  const curve=new THREE.CatmullRomCurve3(cab.pts);
-  const ng=new THREE.TubeGeometry(curve, CABLE_SEGS*2, 0.055, 8, false);
-  cab.mesh.geometry.dispose(); cab.mesh.geometry=ng;
-}
 const PACK_KWH = 75; // kWh per full charge
 const TIERS = [ {kw:150,cost:0}, {kw:350,cost:800}, {kw:600,cost:2000} ];
 // ---- car segments: different packs, patience, fees ----
