@@ -155,7 +155,8 @@ export function createBays(ctx){
       cableStep(b.cable, a, cB, dt);
       // port ring indicator while this bay's connector is held
       if(b.portRing){
-        const wantVis = (!b.plugged && b.car && (sim.grabbedBay===b || !sim.grabbedBay)) ;
+        const near = b.car && camera.position.distanceTo(b.car.position)<6;
+        const wantVis = (!b.plugged && b.car && (sim.grabbedBay===b || near)) ;
         const isTarget = sim.grabbedBay===b;
         b.portRing.material.opacity += ((isTarget? (0.85+0.15*Math.sin(now/150)) : (wantVis? 0.3:0)) - b.portRing.material.opacity)*Math.min(1,dt*8);
         if(b.car){ const p=bayPort(b); b.portRing.position.copy(p); b.portRing.lookAt(camera.position);
