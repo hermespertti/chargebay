@@ -49,15 +49,22 @@ export function createWeather(ctx){
     if(now>sim.nextWx){
       sim.nextWx = now + 60000+Math.random()*90000; // every 1-2.5 real min
       const r=Math.random();
-      if(r<0.34){ sim.coldUntil=now+60000; SFX.chime(440,330); toast('🧊 Cold snap · charging slower for a minute'); }
-      else if(r<0.62){ sim.brownUntil=now+45000; sim.brownCap= sim.bays.filter(x=>!x.locked).length>2? 500:350; SFX.chime(330,240); toast('⚠️ Brownout · grid capped at '+sim.brownCap+' kW'); }
-      else if(r<0.82){ sim.vipPending=true; sim.vipSpawned=false; toast('👑 VIP stranded outside town — needs rescue charge!');
+      if(r<0.24){ sim.coldUntil=now+60000; SFX.chime(440,330); toast('🧊 Cold snap · charging slower for a minute'); }
+      else if(r<0.44){ sim.brownUntil=now+45000; sim.brownCap= sim.bays.filter(x=>!x.locked).length>2? 500:350; SFX.chime(330,240); toast('⚠️ Brownout · grid capped at '+sim.brownCap+' kW'); }
+      else if(r<0.58){ sim.fogUntil=now+75000; SFX.chime(300,300); toast('🌫️ Fog bank rolling in · drivers can barely see the lot'); }
+      else if(r<0.70){ sim.heatUntil=now+90000; SFX.chime(500,620); toast('🥵 Heatwave · grid prices spiking, solar pumping hard'); }
+      else if(r<0.86){ sim.vipPending=true; sim.vipSpawned=false; toast('👑 VIP stranded outside town — needs rescue charge!');
         sim.bays.forEach(b=>{ if(!b.locked && b.state==='empty') b.nextArrT = Math.min(b.nextArrT||0, now+(sim.techOwned.priority?1200:4000)); }); }
-      else { sim.raining = Math.random()<0.5? 0.15+Math.random()*0.2 : 0.65+Math.random()*0.35; }
+      else { sim.raining = Math.random()<0.5? 0.15+Math.random()*0.2 : 0.65+Math.random()*0.35;
+        if(sim.raining>0.6 && Math.random()<0.5) setTimeout(()=>SFX.thunder(sim.raining>0.8), 800+Math.random()*2500); }
     }
   }
 
   function tick(dt, now){
+    // fog density easing toward event state
+    const fogTarget = now<sim.fogUntil? 1:0;
+    sim.fogK += (fogTarget - sim.fogK)*Math.min(1, dt*0.25);
+    if(sim.raining>0.6 && Math.random()<dt*0.03) SFX.thunder(Math.random()<0.5);
     // wet shimmer + mirror + ripples
     if(sim.raining>0.05 && ctx.asphalt.material.normalMap){ ctx.asphalt.material.normalMap.offset.x=(ctx.asphalt.material.normalMap.offset.x+dt*0.004)%1; ctx.asphalt.material.normalMap.offset.y=(ctx.asphalt.material.normalMap.offset.y+dt*0.006)%1; }
     if(mirror.material.uniforms.uWet){ mirror.material.uniforms.uWet.value=sim.raining; mirror.material.uniforms.uTime.value=now*0.001; }
@@ -90,6 +97,8 @@ export function createWeather(ctx){
     let wx = nk>0.82? 'Clear night' : (nk>0.25? 'Dusk' : 'Clear');
     if(sim.raining>0.4) wx = nk>0.82? 'Rainy night' : nk>0.25? 'Rainy dusk' : 'Light rain';
     if(now<sim.coldUntil) wx = sim.raining>0.4? 'Freezing rain' : 'Cold snap';
+    if(sim.fogK>0.25) wx = sim.fogK>0.7? 'Dense fog' : 'Foggy';
+    if(now<sim.heatUntil) wx = 'Heatwave';
     if(sim.raining>0.4 && sheltered) wx += ' · dry under canopy';
     if(now<sim.brownUntil) wx += ' + Brownout';
     wxEl.textContent = wx;

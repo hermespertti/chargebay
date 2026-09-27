@@ -224,11 +224,9 @@ let chargerProto=null, carProtos=[], origProtos=[], segProto={};
 sim.bays.push(...BAYS.map(x=>({ x, charger:null, car:null, state:'empty', plug:null, plugHome:null, chargeKwh:0, sessionRev:0, sessionCost:0, price:0.124, tier:0, kw:150, sell:0.25 })));
 
 async function loadAssets(){
-  console.log('STAGE chargers');
   const c = await loadGLB('assets/charger.glb'); chargerProto=c.scene; boostEnv(c.scene, 1.8);
   c.scene.traverse(o=>{ if(o.isMesh&&o.material){ const ms=Array.isArray(o.material)?o.material:[o.material]; for(const m of ms){ if(m.name==='ChargerScreen'){ m.emissive.setRGB(0.03,0.30,0.85); m.emissiveIntensity=3.0; } if(m.name==='ChargerLED'){ m.emissiveIntensity=1.8; } } } });
   // hero cars: Khronos CarConcept + three.js Ferrari
-  console.log('STAGE hero');
   const hero1 = await loadGLB('assets/car_concept.glb');
   const h1 = orientCar(hero1.scene); boostEnv(h1, 3.2);
   h1.traverse(o=>{ if(o.isMesh&&o.material){ const n=(o.material.name||'').toLowerCase();
@@ -285,11 +283,8 @@ async function loadAssets(){
     // plug parked at holster
     const pg = carProtos.length? null:null;
   });
-  console.log('STAGE plugs');
   await loadPlugs();
-  console.log('STAGE props');
   await loadProps({ scene, windSway });
-  console.log('STAGE propsdone');
   // Ferrari hero (Draco) — interior, calipers, carbon
   try{
     const fer = await loadGLB('assets/ferrari.glb');
@@ -302,7 +297,6 @@ async function loadAssets(){
       } } });
     f.children[0].rotation.y += Math.PI; // FBX front axis is +Z: flip to match fleet (-Z)
     carProtos.push(f);
-    console.log('STAGE ferrari ok');
   }catch(e){ console.warn('ferrari skipped', e && e.message); }
   collectNightLights();
   if(!ECONOMY.loadGame()){ sim.bays[3].locked=true; }
@@ -519,12 +513,15 @@ window.__GAME = {
   serve(){ sim.served+=1; },
   setClock(h){ sim.gameClock=h*60; },
   weather(v){ sim.raining=Math.max(0,Math.min(1,v)); },
-  wx(){ return {raining:+sim.raining.toFixed(2), cold: performance.now()<sim.coldUntil, brown: performance.now()<sim.brownUntil, cap: sim.brownCap, vipPending: sim.vipPending}; },
+  wx(){ return {raining:+sim.raining.toFixed(2), cold: performance.now()<sim.coldUntil, brown: performance.now()<sim.brownUntil, cap: sim.brownCap, vipPending: sim.vipPending, fogK:+sim.fogK.toFixed(2), heat: performance.now()<sim.heatUntil}; },
+  rollGoals(){ ECONOMY.rollGoals(); return sim.goals.map(g=>g.id); },
   event(name){ const t=performance.now();
     if(name==='cold'){ sim.coldUntil=t+60000; return 'cold'; }
     if(name==='brown'){ sim.brownUntil=t+45000; sim.brownCap=500; return 'brown'; }
     if(name==='vip'){ sim.vipPending=true; sim.vipSpawned=false; return 'vip'; }
-    if(name==='rain'){ sim.raining=0.8; return 'rain'; } return 'none'; },
+    if(name==='rain'){ sim.raining=0.8; return 'rain'; }
+    if(name==='fog'){ sim.fogUntil=t+60000; return 'fog'; }
+    if(name==='heat'){ sim.heatUntil=t+60000; return 'heat'; } return 'none'; },
   forceArr(i,vip){ const b=sim.bays[i]; if(b.state!=='empty') return 'busy'; spawnCar(b,false,!!vip); return 'ok'; },
   info(){ return {nightK:+ATMO.nightK.toFixed(3), clock:Math.floor(sim.gameClock), protos:carProtos.length, fixtures:nightFixtures.length}; },
   camPos(){ return {x:+camera.position.x.toFixed(2), y:+camera.position.y.toFixed(2), z:+camera.position.z.toFixed(2)}; },

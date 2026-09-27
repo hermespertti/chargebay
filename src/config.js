@@ -27,6 +27,8 @@ const GOAL_POOL=[
   { id:'vip', make:d=>({label:'Handle a VIP', target:1, key:'vipDone', reward:45}), },
   { id:'fast', make:d=>({label:'3 fast charges (<90s)', target:3, key:'fast', reward:55}), },
   { id:'kwh', make:d=>({label:'Deliver '+(150+d*40)+' kWh', target:150+d*40, key:'kwh', reward:45+d*8}), },
+  { id:'polite', make:d=>({label:'3 happy tipped drivers', target:3, key:'polite', reward:50}), },
+  { id:'taxirush', make:d=>({label:'Serve 4 taxis', target:4, key:'taxiDone', reward:60}), },
 ];
 
 export { PACK_KWH, TIERS, SEGMENTS, TECH, GOAL_POOL };

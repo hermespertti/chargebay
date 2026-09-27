@@ -24,6 +24,20 @@ const SFX = (function(){
   }
   function resume(){ const c=ensure(); if(c.state==='suspended') c.resume(); api.ctx=c; }
   function setRain(v){ if(!ctx) return; rainGain.gain.setTargetAtTime(v*0.16, ctx.currentTime, 0.6); }
+  function thunder(far){ if(!ctx) return;
+    const d=far?1.4:0.25, t0=ctx.currentTime+d;
+    const dur=far?2.6:1.6, sr=ctx.sampleRate, buf=ctx.createBuffer(1,sr*dur|0,sr);
+    const ch=buf.getChannelData(0); for(let i=0;i<ch.length;i++) ch[i]=(Math.random()*2-1)*Math.pow(1-i/ch.length, far?1.6:2.4);
+    const s=ctx.createBufferSource(); s.buffer=buf; s.playbackRate.value=far?0.6:0.85;
+    const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.setValueAtTime(far?110:300,t0); lp.frequency.exponentialRampToValueAtTime(far?50:120,t0+dur);
+    const g=ctx.createGain(); g.gain.setValueAtTime(far?0.5:0.9,t0);
+    s.connect(lp); lp.connect(g); g.connect(master); s.start(t0);
+    if(!far){ const c=ctx.createBufferSource(); c.buffer=buf; c.playbackRate.value=1.4;
+      const cG=ctx.createGain(); cG.gain.setValueAtTime(0.35,t0); cG.gain.exponentialRampToValueAtTime(0.001,t0+0.4);
+      const hp=ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=180;
+      c.connect(hp); hp.connect(cG); cG.connect(master); c.start(t0); }
+  }
+
   function setCharge(active, n){ if(!ctx) return; const g=active? Math.min(0.10, 0.04*n):0; humGain.gain.setTargetAtTime(g, ctx.currentTime, 0.4); humFilter.frequency.setTargetAtTime(active?220:120, ctx.currentTime, 0.5); }
   function click(freq){ if(!ctx||muted) return; const t=ctx.currentTime;
     const o=ctx.createOscillator(); o.type='square'; o.frequency.setValueAtTime(freq||240,t); o.frequency.exponentialRampToValueAtTime((freq||240)*0.4, t+0.05);
@@ -80,7 +94,7 @@ const SFX = (function(){
     const f=ctx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=1100; f.Q.value=6;
     const g=ctx.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(0.018,t+0.05); g.gain.exponentialRampToValueAtTime(0.0005,t+0.25);
     o.connect(f); f.connect(g); g.connect(master); o.start(t); o.stop(t+0.3); }
-  const api={ resume, setRain:setRain2, setCharge, click, latch, chime, cash, engine, city, rainLFO, departHorn, tire, setTire, wiperSqueak, toggleMute, get muted(){return muted;} };
+  const api={ resume, setRain:setRain2, thunder, setCharge, click, latch, chime, cash, engine, city, rainLFO, departHorn, tire, setTire, wiperSqueak, toggleMute, get muted(){return muted;} };
   window.__SFXREF = api;
   return api;
 })();

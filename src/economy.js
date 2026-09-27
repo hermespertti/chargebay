@@ -20,8 +20,9 @@ export function createEconomy(ctx){
 
   // ---- daily goals + streak retention ----
   function rollGoals(){
-    const picks=[]; let h=sim.day*2654435761>>>0;
-    while(picks.length<3){ h=(h*1103515245+12345)>>>0; const idx=h%GOAL_POOL.length; if(!picks.includes(idx)) picks.push(idx); }
+    const picks=[]; let h=sim.day*2654435761>>>0, tries=0;
+    while(picks.length<3 && tries++<200){ h=(Math.imul(h,1103515245)+12345)>>>0; const idx=h%GOAL_POOL.length; if(!picks.includes(idx)) picks.push(idx); }
+    while(picks.length<3){ const idx=Math.floor(Math.random()*GOAL_POOL.length); if(!picks.includes(idx)) picks.push(idx); }
     sim.goals = picks.map(i=>({ ...GOAL_POOL[i].make(sim.day), done:false, claimed:false, id:GOAL_POOL[i].id }));
     sim.dayStats={served:0, profit:0, kicks:0, vipDone:0, fast:0, kwh:0};
   }
@@ -55,6 +56,8 @@ export function createEconomy(ctx){
       bumpGoalFn('served',1); bumpGoalFn('profit',prof); bumpGoalFn('kwh',(b.chargeKwh||0));
       if(b.car&&b.car.userData.vip) bumpGoalFn('vipDone',1);
       if((performance.now()-(b.chargeStartT||performance.now()))<90000 && (b.chargeKwh||0)>25) bumpGoalFn('fast',1);
+      if(b.car&&b.car.userData.seg&&b.car.userData.seg.id==='taxi') bumpGoalFn('taxiDone',1);
+      if(b.car&&b.car.userData.polite){ b.sessionRev+=3; sim.cash+=3; bumpGoalFn('polite',1); toast('😊 Happy driver tipped +$3'); }
     }
     b.sessionRev=0; b.sessionCost=0;
   }
@@ -125,12 +128,13 @@ export function createEconomy(ctx){
   function tick(dt, now){
     sim.gameClock += dt*1.4; // game time accelerated
     applyDaylight(sim.gameClock);
-    fog.density = THREE.MathUtils.lerp(0.010, 0.0055, THREE.MathUtils.smoothstep(Math.sin(((sim.gameClock/1440)*Math.PI*2)-Math.PI/2)*0.62, 0.04, 0.45)) + sim.raining*0.0012;
+    fog.density = THREE.MathUtils.lerp(0.010, 0.0055, THREE.MathUtils.smoothstep(Math.sin(((sim.gameClock/1440)*Math.PI*2)-Math.PI/2)*0.62, 0.04, 0.45)) + sim.raining*0.0012 + sim.fogK*0.030;
+    if(sim.fogK>0.02) fog.color.lerp(new THREE.Color(0x9fb0bd), sim.fogK*0.55);
     const hh=Math.floor(sim.gameClock/60)%24, mm=Math.floor(sim.gameClock%60);
     clockEl.textContent = String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
-    sim.spotPrice = 0.10+0.06*Math.sin(sim.gameClock/47)+0.02*Math.sin(sim.gameClock/7.3);
+    sim.spotPrice = 0.10+0.06*Math.sin(sim.gameClock/47)+0.02*Math.sin(sim.gameClock/7.3)+(now<sim.heatUntil?0.03:0);
     // solar rooftop production: clear sky + daylight -> free kWh into buffer
-    { const elev=Math.sin(((sim.gameClock/1440)*Math.PI*2)-Math.PI/2); const sunFactor=Math.max(0,elev)*(1-Math.min(1,sim.raining*1.4)); const gen=sim.SOLAR_CAP_KW*sunFactor*dt/3600*60; if(gen>0){ if(sim.bufferOwned){ sim.bufferKwh=Math.min(sim.BUFFER_CAP, sim.bufferKwh+gen); } else { sim.solarKwh+=gen; } sim.solarLast=sunFactor; } }
+    { const elev=Math.sin(((sim.gameClock/1440)*Math.PI*2)-Math.PI/2); const sunFactor=Math.max(0,elev)*(1-Math.min(1,sim.raining*1.4))*(performance.now()<sim.heatUntil?1.25:1); const gen=sim.SOLAR_CAP_KW*sunFactor*dt/3600*60; if(gen>0){ if(sim.bufferOwned){ sim.bufferKwh=Math.min(sim.BUFFER_CAP, sim.bufferKwh+gen); } else { sim.solarKwh+=gen; } sim.solarLast=sunFactor; } }
     // cheap-price surplus charges the buffer (cost booked to dayCost)
     if(sim.bufferOwned){
       if(sim.spotPrice<0.085 && sim.bufferKwh<sim.BUFFER_CAP){
@@ -149,7 +153,7 @@ export function createEconomy(ctx){
         if(b.state==='empty' && b.nextArrT && now>=b.nextArrT){
           spawnCar(b, false, sim.vipPending && !sim.vipSpawned); if(sim.vipPending) sim.vipSpawned=true;
           const adsBoost = sim.techOwned.ads?0.75:1;      // ad network: arrivals 25% sooner
-          b.nextArrT = now + (12000 - Math.min(8000, sim.spotPrice*40000)) * (0.6+Math.random()*0.8) / repMult() / demandFactor() * adsBoost;
+          b.nextArrT = now + (12000 - Math.min(8000, sim.spotPrice*40000)) * (0.6+Math.random()*0.8) / repMult() / demandFactor() * adsBoost * (1 + sim.fogK*1.6) * (performance.now()<sim.heatUntil?0.82:1);
         }
       }
     }

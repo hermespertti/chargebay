@@ -13,6 +13,8 @@ export const sim = {
   raining: 0,
   wxTimer: 0, coldUntil: 0, brownUntil: 0, brownCap: 500,
   vipPending: false, vipSpawned: false, nextWx: 0,
+  fogUntil: 0, fogK: 0,          // fog bank: density ramp + arrival suppression
+  heatUntil: 0,                  // heatwave: grid price spike + solar boost
   // money
   cash: 500, day: 1, dayRev: 0, dayCost: 0, servedTotal: 0,
   revenue: 0, served: 0,
