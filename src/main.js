@@ -247,6 +247,7 @@ async function loadAssets(){
     { file:'assets/car_van.glb', seg:'van',   port:[-1.20,0.96,-0.99] },
     { file:'assets/car_retro.glb', seg:'retro', port:[-0.50,0.80,-0.83] },
     { file:'assets/car_vip.glb', seg:'super', port:[-0.55,0.58,-0.90] },
+    { file:'assets/car_truck.glb', seg:'truck', port:[0.98,1.10,-1.32] },
   ];
   segProto = {};
   for(const fd of FLEET_DEF){
@@ -568,6 +569,9 @@ window.__GAME = {
   grab(i){ if(sim.bays[i].plugged) return 'plugged'; if(sim.grabbedBay&&sim.grabbedBay!==sim.bays[i]) return 'busy'; sim.grabbedBay=sim.bays[i]; sim.docked=false; return 'grabbed'; },
   dock(i){ if(!sim.bays[i].car) return 'nocar'; sim.docked=false; sim.grabbedBay=null; sim.bays[i].plugged=true; sim.bays[i].car.userData.docked=true; sim.bays[i].state='ready'; BAYSYS.autoEnergize(sim.bays[i]); return sim.bays[i].state; },
   energize(i){ if(i!=null && sim.bays[i].plugged) BAYSYS.autoEnergize(sim.bays[i]); return i!=null? sim.bays[i].state : 'none'; },
+  unlockBay(i){ SHOP.unlockBay(sim.bays[i]); return sim.bays[i].locked? 'locked':'ok'; },
+  upBay(i){ SHOP.upgradeBay(sim.bays[i]); return {tier:sim.bays[i].tier, kw:sim.bays[i].kw}; },
+  bufferbuy(){ SHOP.buyBuffer(); return sim.bufferOwned; },
   pause(i){ if(i!=null) INTERACTION.toggleCharge(i); return i!=null? sim.bays[i].state : 'none'; },
   econ(){ return {revenue:+sim.revenue.toFixed(2), served: sim.served, price:+sim.spotPrice.toFixed(4)}; },
   loadKw(){ let t=0; for(const b of sim.bays) if(b.state==='charging') t+=b.kw; return t; },

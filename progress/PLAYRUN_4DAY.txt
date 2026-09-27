@@ -1,0 +1,15 @@
+# Economic playthrough — 4 game-days @ warp 6 (bot, dock interval ~1.2s)
+
+- arrivals 97 · served 95 · kicks 0 · rep 100
+- lifetime revenue $1,254 · capex $1,800 (heater->buffer->ads) · cash $483
+- buffer filled to 199.8/200 kWh — cheap-price surplus pump works
+- goals: server-side daily reset stats visible only after day roll; hs empty = day 5 card closed
+- unserved 2/97: 3-bay capacity slightly short of peak traffic -> bay #4 unlock pressure (real strategic tension)
+
+Run: node tools/playrun.mjs 4 6
+PLAYING 4 days at warp 6
+FINAL: {"money":{"cash":483.29,"day":5,"dayRev":0,"dayCost":0,"bufferKwh":199.83,"bufferOwned":true},"econ":{"revenue":1254.45,"served":95,"price":0.1007},"rep":100,"hs":{"served":{},"arrivals":{},"kicks":{},"arrivedTotal":97},"tech":{"heater":true,"ads":true},"mk":{"markup":1.9,"sell":0.2113,"demand":0.705}}
+LOG: ["BUY @0s: heater","BUY @817s: ads"]
+ERRORS: none
+DONE
+EXIT=0

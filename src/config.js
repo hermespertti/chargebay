@@ -11,6 +11,7 @@ const SEGMENTS = [
   { id:'van',   name:'Delivery van',pack:110,patience:[160,220], fee:0.88, w:2, paint:0xdfe4ea },
   { id:'retro', name:'Retro classic',pack:40,patience:[75,110],  fee:1.35, w:1, paint:0x8a2be2 },
   { id:'super', name:'Supercar',     pack:105,patience:[45,75],  fee:1.60, w:1, paint:null },
+  { id:'truck', name:'Big-rig hauler',pack:150,patience:[140,190], fee:1.15, w:2, paint:null },
 ];
 
 const TECH = {

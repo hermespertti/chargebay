@@ -68,7 +68,7 @@ export function spawnCar(ctx, bay, instant=false, vip=false, seg=null){
   const car = proto.clone(true);
   if(proto.userData && proto.userData.protoPort) car.userData.portLocal = new THREE.Vector3(...proto.userData.protoPort);
   car.traverse(o=>{ if(o.isMesh){o.castShadow=true; o.receiveShadow=true;} });
-  const sz = seg.id==='van'? 1.28 : seg.id==='suv'? 1.12 : seg.id==='taxi'? 1.0 : seg.id==='retro'? 0.94 : 1.0;
+  const sz = seg.id==='truck'? 1.5 : seg.id==='van'? 1.28 : seg.id==='suv'? 1.12 : seg.id==='taxi'? 1.0 : seg.id==='retro'? 0.94 : 1.0;
   car.scale.multiplyScalar(sz); bay.carScale=sz;
   const roll = vip? 0.03+Math.random()*0.12 : 0.08+Math.random()*0.5;
   car.userData = { battery: roll, need: vip? 0.95 : 0.72+Math.random()*0.25, patience: vip? 55 : seg.patience[0]+Math.random()*(seg.patience[1]-seg.patience[0]), arrived: performance.now(), vip, seg, packKwh: seg.pack, polite: Math.random()<0.12 };
