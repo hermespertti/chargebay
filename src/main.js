@@ -22,6 +22,8 @@ import { createWeather } from './weather.js';
 import { createEconomy } from './economy.js';
 import { createBays } from './bays.js';
 import { createPlayer } from './player.js';
+import { createShop } from './shop.js';
+import { createInteraction } from './interaction.js';
 import { loadGLB, PAINTS, orientCar, boostEnv, contactShadow, spawnCar as spawnCarAsset } from './assets.js';
 
 // ---------------- core ----------------
@@ -362,57 +364,13 @@ async function loadAssets(){
   if(!ECONOMY.loadGame()){ sim.bays[3].locked=true; }
   if(!sim.goals.length) ECONOMY.rollGoals(); ECONOMY.paintGoals();
   document.getElementById('dcBtn').addEventListener('click',()=>{ ECONOMY.hideDayCard(); if(!PLAYER.isTouch&&PLAYER.controls.isLocked===false) PLAYER.controls.lock(); });
-  applyLocked();
-  if(sim.bufferOwned) addBuffer();
+  SHOP.applyLocked();
+  if(sim.bufferOwned) SHOP.addBuffer();
   sim.bays.forEach(b=>{ if(!b.locked){ spawnCar(b, true); b.nextArrT = performance.now()+4000+Math.random()*5000; } });
   sim.ready=true;
   // NOTE: do NOT auto-hide #start — overlay stays until the player actually
   // engages (click-lock on desktop, tap on touch). Capture harness hides it itself.
   if(!window.__GAMESPAWN) window.dispatchEvent(new Event('gamespawn'));
-}
-function applyLocked(){
-  sim.bays.forEach(b=>{
-    if(b.charger){ b.charger.visible=true; b.charger.traverse(o=>{ if(o.isMesh&&o.material&&o.material.emissive){ o.material=o.material.clone?o.material.clone():o.material; o.material.emissive.setHex(b.locked?0x7a2020:0x1a2a3a); } }); }
-    if(b.plug){ b.plug.visible = !b.locked; }
-    if(b.locked && b.car){ scene.remove(b.car); b.car=null; b.state='empty'; }
-  });
-}
-let bufferMesh=null, bufferLight=null;
-function addBuffer(){
-  if(bufferMesh) return;
-  bufferMesh=new THREE.Mesh(new THREE.BoxGeometry(2.4,1.4,1.1), new THREE.MeshStandardMaterial({color:0x20262e, metalness:0.7, roughness:0.35, envMapIntensity:1.4}));
-  bufferMesh.position.set(9.6,0.7,-6.2); bufferMesh.castShadow=true; scene.add(bufferMesh);
-  const lens=new THREE.Mesh(new THREE.PlaneGeometry(2.0,0.22), new THREE.MeshStandardMaterial({color:0x0a1410, emissive:0x35e07c, emissiveIntensity:1.6}));
-  lens.position.set(9.6,1.05,-5.64); scene.add(lens); bufferMesh.userData.lens=lens;
-  bufferLight=new THREE.PointLight(0x35e07c, 6, 6, 1.8); bufferLight.position.set(9.6,1.2,-5.2); scene.add(bufferLight);
-}
-function upgradeBay(b){
-  if(b.locked){ toast('Unlock this bay first (N)'); return; }
-  const nx=TIERS[b.tier+1]; if(!nx){ toast('Already top tier'); return; }
-  if(sim.cash<nx.cost){ toast('❌ Need $'+nx.cost); return; }
-  sim.cash-=nx.cost; b.tier++; b.kw=nx.kw; sim.dayCost+=nx.cost;
-  SFX.cash(); toast('🔧 Upgraded to '+nx.kw+' kW');
-  if(b.charger) b.charger.traverse(o=>{ if(o.isMesh&&o.material&&o.material.emissive) o.material.emissiveIntensity=2.2; });
-}
-function buyTech(id){
-  const tc=TECH[id]; if(!tc){ toast('Unknown tech'); return false; }
-  if(sim.techOwned[id]){ toast(tc.name+' already installed'); return false; }
-  if(sim.rep < tc.rep){ toast('🔒 '+tc.name+' needs ★ '+tc.rep+' reputation ('+Math.round(sim.rep)+' so far)'); SFX.chime(220,180); return false; }
-  if(sim.cash<tc.cost){ toast('❌ Need $'+tc.cost); return false; }
-  sim.cash-=tc.cost; sim.dayCost+=tc.cost; sim.techOwned[id]=true; SFX.cash(); SFX.chime(660,990);
-  toast('🎉 <b>'+tc.name+'</b> installed · '+tc.eff+' now active'); flashTech(); ECONOMY.saveGame(); return true;
-}
-function flashTech(){ const f=document.getElementById('techflash'); if(!f) return; f.style.display='block'; f.style.animation='none'; void f.offsetWidth; f.style.animation='tflash 1.6s ease-out forwards'; }
-function buyBuffer(){
-  if(sim.bufferOwned){ toast('Buffer already installed'); return; }
-  if(sim.cash<sim.BUFFER_COST){ toast('❌ Need $'+sim.BUFFER_COST); return; }
-  sim.cash-=sim.BUFFER_COST; sim.dayCost+=sim.BUFFER_COST; sim.bufferOwned=true; addBuffer(); SFX.cash(); toast('🔋 Battery buffer installed');
-}
-function unlockBay(b){
-  if(!b.locked){ toast('Bay already unlocked'); return; }
-  if(sim.cash<1200){ toast('❌ Need $1200'); return; }
-  sim.cash-=1200; sim.dayCost+=1200; b.locked=false; applyLocked(); SFX.cash(); toast('🟺 Bay '+(BAYS.indexOf(b.x)+1)+' unlocked');
-  b.nextArrT = performance.now()+2000+Math.random()*4000;
 }
 let plugsProto=null;
 async function loadPlugs(){
@@ -435,7 +393,7 @@ const ASSETCTX = { scene, pickSegment, SEGMENTS,
   carProtos: ()=>carProtos, origProtos: ()=>origProtos, segProto: ()=>segProto };
 
 // interaction key events (movement/input state lives in player.js)
-addEventListener('keydown',e=>{ SFX.resume(); onKey(e); });
+addEventListener('keydown',e=>{ SFX.resume(); INTERACTION.onKey(e); });
 
 // ---- car segments: different packs, patience, fees ----
 function pickSegment(){
@@ -461,8 +419,9 @@ const WEATHER = createWeather({ scene, camera, mirror, ripples, windSway,
 
 // ---- economy system: market, solar/buffer, arrivals, day cycle, goals, save ----
 const ECONOMY = createEconomy({ scene, fog, applyDaylight, WORLD, spawnCar,
-  carProtos: ()=>carProtos, toast, addBuffer, flashTech,
-  bufferLens: (hex)=>{ if(bufferMesh&&bufferMesh.userData.lens) bufferMesh.userData.lens.material.emissive.setHex(hex); } });
+  carProtos: ()=>carProtos, toast,
+  addBuffer: ()=>SHOP.addBuffer(), flashTech: ()=>SHOP.flashTech(),
+  bufferLens: (hex)=>SHOP.bufferLens(hex) });
 
 // ---- bay system: state machine, charging, cables, plug follow ----
 const BAYSYS = createBays({ scene, camera, toast, loadEl, BAY_X: BAYS,
@@ -471,115 +430,24 @@ const BAYSYS = createBays({ scene, camera, toast, loadEl, BAY_X: BAYS,
 // ---- player: FPS input, pointer lock, touch stick, targeting ----
 const startEl=document.getElementById('start');
 const PLAYER = createPlayer({ scene, camera, renderer, toast, startEl: document.getElementById('start'),
-  onInteract: ()=>tryInteract(), onCharge: ()=>toggleCharge() });
+  onInteract: ()=>INTERACTION.tryInteract(), onCharge: ()=>INTERACTION.toggleCharge() });
+
+// ---- shop: upgrades, buffer, tech tree + menu ----
+const SHOP = createShop({ scene, toast, ECONOMY, BAY_X: BAYS,
+  onMenuOpen: ()=>{ if(!PLAYER.isTouch) PLAYER.controls.unlock(); },
+  onMenuClose: ()=>{ if(!PLAYER.isTouch && !PLAYER.touchMode) PLAYER.controls.lock(); } });
+
+// ---- interaction: key commands + grab/dock state machine ----
+const INTERACTION = createInteraction({ camera, toast, PLAYER, BAYSYS, ECONOMY, SHOP });
 document.getElementById('playbtn').addEventListener('click',()=>{ SFX.resume(); if(PLAYER.isTouch) PLAYER.enterTouch(); else PLAYER.controls.lock(); COACH.maybeShow(); });
 startEl.addEventListener('click',(e)=>{ if(!PLAYER.isTouch && e.target.id!=='playbtn') PLAYER.controls.lock(); });
 PLAYER.controls.addEventListener('lock', ()=>{ startEl.style.display='none'; });
-PLAYER.controls.addEventListener('unlock', ()=>{ if(sim.ready && !PLAYER.isTouch && !PLAYER.touchMode && !techOpen) startEl.style.display='flex'; });
+PLAYER.controls.addEventListener('unlock', ()=>{ if(sim.ready && !PLAYER.isTouch && !PLAYER.touchMode && !SHOP.techOpen) startEl.style.display='flex'; });
 renderer.domElement.addEventListener('click',()=>{ SFX.resume(); if(sim.ready && !PLAYER.isTouch && PLAYER.controls.isLocked===false) PLAYER.controls.lock(); });
 
 
-function lensDrip(dt){
-  if(!lensG) return;
-  lensG.clearRect(0,0,640,360);
-  for(const d of drops){
-    d.y += d.v*dt*(60+d.r*40);
-    if(d.y>360+d.r){ d.y=-d.r*3; d.x=Math.random()*640; d.trail=0; }
-    // droplet blob
-    const g=lensG.createRadialGradient(d.x,d.y,0.5,d.x,d.y,d.r*2.4);
-    g.addColorStop(0,'rgba(255,250,240,0.55)'); g.addColorStop(0.6,'rgba(200,220,235,0.16)'); g.addColorStop(1,'rgba(0,0,0,0)');
-    lensG.fillStyle=g; lensG.beginPath(); lensG.arc(d.x,d.y,d.r*2.4,0,Math.PI*2); lensG.fill();
-    // trail when running
-    if(d.v>0.45){ lensG.fillStyle='rgba(220,235,245,0.10)'; lensG.fillRect(d.x-d.r*0.6, d.y-d.r*8, d.r*1.2, d.r*8); }
-  }
-}
 
 
-function onKey(e){
-  if(!sim.ready) return;
-  if(e.code==='KeyE') tryInteract();
-  if(e.code==='KeyR') toggleCharge();
-  if(e.code==='BracketLeft'||e.code==='BracketRight'){
-    const d=e.code==='BracketRight'? 0.05 : -0.05;
-    const nv=THREE.MathUtils.clamp(sim.sellMarkup+d, sim.MARKUP_MIN, sim.MARKUP_MAX);
-    if(nv!==sim.sellMarkup){ sim.sellMarkup=nv; SFX.click(nv>1.9?520:380);
-      toast('💲 Price set <b>'+Math.round(sellPrice()*100)+'¢/kWh</b> · margin '+Math.round((sim.sellMarkup-1)*100)+'% · demand '+Math.round(demandFactor()*100)+'%'); }
-  }
-  if(e.code==='KeyM'){ const m=SFX.toggleMute(); toast(m?'🔇 Muted':'🔊 Sound on'); }
-  if(e.code==='KeyU'){ const t=PLAYER.currentTarget(); if(t) upgradeBay(t.bay); }
-  if(e.code==='KeyB'){ buyBuffer(); }
-  if(e.code==='KeyN'){ const t=PLAYER.currentTarget(); if(t&&t.bay.locked) unlockBay(t.bay); }
-  if(e.code==='KeyP'){ ECONOMY.saveGame(); toast('💾 Saved'); }
-  if(e.code==='KeyT'){ toggleTechMenu(); }
-  if(techOpen){
-    const idx=['Digit1','Digit2','Digit3','Digit4'].indexOf(e.code);
-    if(idx>=0){ const id=Object.keys(TECH)[idx]; buyTech(id); renderTech(); }
-    if(e.code==='Escape'){ toggleTechMenu(false); }
-  }
-}
-
-let daySummaryT=0;
-
-function tryInteract(){
-  const t = PLAYER.currentTarget();
-  if(!t) return;
-  const b=t.bay;
-  // holding THIS bay's connector, docked in hand -> unplug
-  if(sim.grabbedBay===b && sim.docked){
-    sim.docked=false; b.plugged=false; b.state='parked';
-    b.car.userData.arrived=performance.now();
-    b.car.userData.docked=false; SFX.click(200);
-    if((b.chargeKwh||0)>0.05){ ECONOMY.paySession(b); toast('🔌 Unplugged — paid'); }
-    else toast('🔌 Connector unplugged');
-    b.plug.position.copy(b.plugHome.pos); b.plug.rotation.copy(b.plugHome.rot); BAYSYS.setJacket(b, false);
-    sim.grabbedBay=null; return;
-  }
-  // holding this bay's connector in hand -> try to dock
-  if(sim.grabbedBay===b && !sim.docked){
-    if(b.car){
-      const port=BAYSYS.bayPort(b);
-      if(port.distanceTo(camera.position)<2.2){
-        sim.docked=true; b.plugged=true; b.car.userData.docked=true; b.state='ready'; b.chargeStartT=performance.now(); b.chargeKwh=0;
-        // GLB ground truth: nozzle tip = local +Y (tip at y .17..21), face-up = local +Z.
-        // insert along the car's lateral body normal (through the side port), not toward car center
-        const inward=new THREE.Vector3(1,0,0).applyQuaternion(b.car.quaternion); // port is local -X side => into body = car local +X
-        const up=new THREE.Vector3(0,1,0);
-        const xA=new THREE.Vector3().crossVectors(up,inward); if(xA.lengthSq()<1e-6) xA.set(1,0,0); xA.normalize();
-        const zA=new THREE.Vector3().crossVectors(inward,xA).normalize();
-        b.plug.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xA,inward,zA));
-        b.plug.position.copy(port).addScaledVector(inward,0.06);
-        BAYSYS.autoEnergize(b);
-        sim.grabbedBay=null; sim.docked=false;
-        SFX.latch(); toast('✅ Locked — charging'); return;
-      } else { toast('❌ Move closer to the port'); return; }
-    }
-  }
-  // hands free, looking at a plugged car -> unplug it (finishes session)
-  if(!sim.grabbedBay && t.type==='car' && b.plugged){
-    if(b.state==='charging'){ b.state='parked'; }
-    b.plugged=false; b.car.userData.docked=false;
-    b.car.userData.arrived=performance.now(); SFX.click(200);
-    if((b.chargeKwh||0)>0.05){ ECONOMY.paySession(b); toast('🔌 Unplugged — paid'); }
-    else toast('🔌 Connector unplugged');
-    b.plug.position.copy(b.plugHome.pos); b.plug.rotation.copy(b.plugHome.rot);
-    return;
-  }
-  // grab a connector (bay must have a car and not be plugged already)
-  if(t.type==='charger' && !sim.grabbedBay && !b.plugged && b.car){
-    sim.grabbedBay=b; sim.docked=false; SFX.click(260); toast('🔌 Grabbed connector — aim at car port, press E');
-    return;
-  }
-  if(t.type==='charger' && b.plugged && !sim.grabbedBay){ toast('⚡ Bay already charging'); }
-}
-
-function toggleCharge(forceBay){
-  // R is now just pause/resume — plugging in already starts charging.
-  let b= forceBay!=null ? sim.bays[forceBay] : (sim.grabbedBay && sim.docked ? sim.grabbedBay : (PLAYER.currentTarget()? PLAYER.currentTarget().bay : null));
-  if(!b){ toast('Aim at a charger'); return; }
-  if(!b.plugged){ toast('Dock the connector first (E)'); return; }
-  if(b.state==='charging'){ b.state='ready'; SFX.click(180); toast('⏸ Charging paused'); return; }
-  BAYSYS.autoEnergize(b);
-}
 
 // ---------------- loop ----------------
 let last=performance.now(), fpsAcc=0, fpsN=0, fpsVal=60;
@@ -716,10 +584,10 @@ window.__GAME = {
   setBatt(i,v){ if(sim.bays[i].car){ sim.bays[i].car.userData.battery=v; return 'ok'; } return 'nocar'; },
   q(){ return {mode:Q.mode, fps:diag.fps, pxr:renderer.getPixelRatio?+renderer.getPixelRatio().toFixed(2):null}; },
   techState(){ return Object.assign({}, sim.techOwned); },
-  techbuy(id){ return buyTech(id); },
+  techbuy(id){ return SHOP.buyTech(id); },
   setCash(v){ sim.cash=v; return sim.cash; },
   repGet(){ return sim.rep; },
-  techmenu(force){ toggleTechMenu(force); return techOpen; },
+  techmenu(force){ SHOP.toggleTechMenu(force); return SHOP.techOpen; },
   aimPort(i){ const b=sim.bays[i]; if(!b.car) return 'nocar'; const p=BAYSYS.bayPort(b); camera.position.set(p.x+1.35, p.y+0.15, p.z+0.45); camera.lookAt(p); return 'ok'; },
   portPos(i){ const b=sim.bays[i]; if(!b.car) return null; const p=BAYSYS.bayPort(b); return {x:+p.x.toFixed(2),y:+p.y.toFixed(2),z:+p.z.toFixed(2)}; },
   forceSeg(i,id,ci){ const p=(segProto[id]&&segProto[id][ci||0])||(origProtos[0]); if(!p) return 'nopool';
@@ -756,7 +624,7 @@ window.__GAME = {
   grab(i){ if(sim.bays[i].plugged) return 'plugged'; if(sim.grabbedBay&&sim.grabbedBay!==sim.bays[i]) return 'busy'; sim.grabbedBay=sim.bays[i]; sim.docked=false; return 'grabbed'; },
   dock(i){ if(!sim.bays[i].car) return 'nocar'; sim.docked=false; sim.grabbedBay=null; sim.bays[i].plugged=true; sim.bays[i].car.userData.docked=true; sim.bays[i].state='ready'; BAYSYS.autoEnergize(sim.bays[i]); return sim.bays[i].state; },
   energize(i){ if(i!=null && sim.bays[i].plugged) BAYSYS.autoEnergize(sim.bays[i]); return i!=null? sim.bays[i].state : 'none'; },
-  pause(i){ if(i!=null) toggleCharge(i); return i!=null? sim.bays[i].state : 'none'; },
+  pause(i){ if(i!=null) INTERACTION.toggleCharge(i); return i!=null? sim.bays[i].state : 'none'; },
   econ(){ return {revenue:+sim.revenue.toFixed(2), served: sim.served, price:+sim.spotPrice.toFixed(4)}; },
   loadKw(){ let t=0; for(const b of sim.bays) if(b.state==='charging') t+=b.kw; return t; },
   money(){ return {cash:+sim.cash.toFixed(2), day: sim.day, dayRev:+sim.dayRev.toFixed(2), dayCost:+sim.dayCost.toFixed(2), bufferKwh:+sim.bufferKwh.toFixed(2), bufferOwned: sim.bufferOwned}; },
@@ -768,7 +636,7 @@ window.__GAME = {
   cardOpen(){ return !!(window.__GAME&&window.__GAME._cardOpen); },
   goalsState(){ return {goals: sim.goals, dayStats: sim.dayStats, streak: sim.streak}; },
   completeGoal(id){ const g=sim.goals.find(x=>x.id===id); if(g&&!g.done){ sim.dayStats[g.key]=g.target; ECONOMY.bumpGoal(g.key,0);} return 'ok'; },
-  techopen(){ toggleTechMenu(true); return 'ok'; },
+  techopen(){ SHOP.toggleTechMenu(true); return 'ok'; },
   tailGlow(i){ const car=sim.bays[i]&&sim.bays[i].car; if(!car) return null; let mx=0; car.traverse(o=>{ if(o.isMesh&&o.material&&/tail/i.test(o.material.name||'')) mx=Math.max(mx,o.material.emissiveIntensity); }); return +mx.toFixed(2); },
   finishArr(i){ const b=sim.bays[i]; if(b.state==='arriving'&&b.car){ b.car.position.z=b.driveTo; b.car.rotation.y=Math.PI+(b.x-b.car.position.x)*0.035; b.state='parked'; b.car.userData.arrived=performance.now(); } return b.state; },
   kickBay(i){ const b=sim.bays[i]; if(b.car&&b.state!=='departing'){ b.state='departing'; b.plugged=false; } return b.state; },
@@ -814,28 +682,6 @@ const COACH = (function(){
   return { init, maybeShow, tick, hide };
 })();
 COACH.init();
-// ---------------- tech menu ----------------
-let techOpen=false;
-const TECH_ICONS={heater:'🌡️',inverter:'⚙️',ads:'📡',priority:'👑'};
-function renderTech(){
-  const box=document.getElementById('techlist');
-  const tr=document.getElementById('techrep'); if(tr) tr.textContent='★ '+Math.round(sim.rep)+' reputation';
-  box.innerHTML=Object.keys(TECH).map((id,i)=>{
-    const tc=TECH[id], own=!!sim.techOwned[id];
-    const afford=sim.cash>=tc.cost, repOK=sim.rep>=tc.rep;
-    const lockTag = (!own && !repOK) ? '<span class="tlock">🔒 needs ★'+tc.rep+'</span>' : '';
-    const effTag = '<span class="teff">'+tc.eff+'</span>';
-    return '<div class="tcard'+(own?' owned':'')+(!repOK&&!own?' locked':'')+'"><div class="ticon">'+(TECH_ICONS[id]||'🔬')+'</div><div class="tinfo"><b>'+(i+1)+'. '+tc.name+' '+effTag+lockTag+'</b><p>'+tc.desc+'</p></div>'+(own?'<button class="tbuy owned" disabled>✓ ACTIVE</button>':'<button class="tbuy" data-tech="'+id+'" '+(afford&&repOK?'':'disabled')+'>'+(repOK?'$'+tc.cost:'★'+tc.rep)+'</button>')+'</div>';
-  }).join('');
-  box.querySelectorAll('[data-tech]').forEach(btn=>btn.addEventListener('click',()=>{ buyTech(btn.dataset.tech); renderTech(); }));
-}
-function toggleTechMenu(force){
-  techOpen = force!==undefined? force : !techOpen;
-  const el=document.getElementById('tech');
-  el.style.display= techOpen? 'flex':'none';
-  if(techOpen){ renderTech(); if(!PLAYER.isTouch) PLAYER.controls.unlock(); }
-  else if(!PLAYER.isTouch && !PLAYER.touchMode) PLAYER.controls.lock();
-}
 WEATHER.initLensFx();
 loadAssets().catch(e=>{ console.error('asset load failed', e && e.type, e && e.message); sim.ready=true; });
 setInterval(()=>{ if(sim.ready) ECONOMY.saveGame(); }, 30000);
