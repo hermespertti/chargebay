@@ -23,8 +23,9 @@ import { createEconomy } from './economy.js';
 import { createBays } from './bays.js';
 import { createPlayer } from './player.js';
 import { createShop } from './shop.js';
+import { createQuality } from './quality.js';
 import { createInteraction } from './interaction.js';
-import { loadGLB, PAINTS, orientCar, boostEnv, contactShadow, spawnCar as spawnCarAsset } from './assets.js';
+import { loadGLB, PAINTS, orientCar, boostEnv, contactShadow, spawnCar as spawnCarAsset, loadProps } from './assets.js';
 
 // ---------------- core ----------------
 const app = document.getElementById('app');
@@ -42,7 +43,6 @@ const camera = new THREE.PerspectiveCamera(72, innerWidth/innerHeight, 0.05, 400
 camera.position.set(2.2, 1.65, 7.5);
 
 // quality settings (shared with atmosphere via Q)
-const QKEY='chargebay_quality_v1';
 const Q = { mode: 'auto', glare: 1.0, envMax: 2.2 };
 
 // ---- atmosphere: HDRI env, sky, fog, sun/rake/hemi, day-night cycle ----
@@ -223,62 +223,6 @@ function softWetMask(){
 let chargerProto=null, carProtos=[], origProtos=[], segProto={};
 sim.bays.push(...BAYS.map(x=>({ x, charger:null, car:null, state:'empty', plug:null, plugHome:null, chargeKwh:0, sessionRev:0, sessionCost:0, price:0.124, tier:0, kw:150, sell:0.25 })));
 
-// ---------------- quality settings ----------------
-function qApply(mode){
-  Q.mode = mode; localStorage.setItem(QKEY, mode);
-  if(mode==='high'){ Q.glare=1.0; Q.envMax=2.6; renderer.setPixelRatio(Math.min(devicePixelRatio,1.5)); renderer.shadowMap.enabled=true; if(ssao) ssao.enabled=true; WEATHER.rain.count=Math.min(WEATHER.rainCount, 2600); mirror.visible=true; }
-  else if(mode==='med'){ Q.glare=0.75; Q.envMax=1.6; renderer.setPixelRatio(Math.min(devicePixelRatio,1)); renderer.shadowMap.enabled=true; if(ssao) ssao.enabled=false; WEATHER.rain.count=Math.min(WEATHER.rainCount, 1400); mirror.visible=true; }
-  else if(mode==='low'){ Q.glare=0.6; Q.envMax=1.2; renderer.setPixelRatio(Math.max(0.65, Math.min(devicePixelRatio,0.7))); renderer.shadowMap.enabled=false; if(ssao) ssao.enabled=false; WEATHER.rain.count=Math.min(WEATHER.rainCount, 600); mirror.visible=false; }
-  else { // auto: scale by display width; fps governor in animate
-    renderer.setPixelRatio(Math.min(devicePixelRatio, Math.max(0.65, 1200/window.innerWidth)));
-    if(ssao) ssao.enabled = window.innerWidth<=1600;
-    WEATHER.rain.count=Math.min(WEATHER.rainCount, 1400); mirror.visible=true;
-  }
-  scene.traverse(o=>{ if(o.isMesh&&o.material){ const ms=Array.isArray(o.material)?o.material:[o.material]; for(const m of ms){ if(m.isMeshStandardMaterial){ m.envMapIntensity=Math.min(m.envMapIntensity||1, Q.envMax); m.needsUpdate=true; } } } });
-  applyDaylight(sim.gameClock);
-  toast('\u2699 Quality: '+mode.toUpperCase());
-}
-let autoLowT=0, autoDropped=false;
-
-// real foliage & street props (Poly Haven)
-const PROPS = {};
-const windSway=[];   // {o, ph, amp} — gentle canopy breeze, stronger when raining
-
-async function loadProps(){
-  const defs = [
-    ['shrub','assets/shrub_b.glb'],
-    ['shrub2','assets/shrub_a.glb'],
-    ['planter','assets/planter.glb'],
-    ['tree','assets/tree.glb'],
-    ['lamp','assets/lamp.glb'],
-  ];
-  for(const [k,u] of defs){
-    try{ console.log('PROP', k); const g=await loadGLB(u); PROPS[k]=g.scene; boostEnv(PROPS[k],1.4); console.log('PROP OK', k); }catch(e){ console.warn('prop fail',k,e&&e.message); }
-  }
-  // light authored scenery: bench/bin/bollard/low-tree in one small GLB
-  try{ const g=await loadGLB('assets/scenery.glb');
-    for(const o of g.scene.children){ PROPS[o.name.toLowerCase()]=o; }
-    boostEnv(g.scene,1.2);
-    g.scene.traverse(m=>{ if(m.isMesh){ const ms=Array.isArray(m.material)?m.material:[m.material]; for(const mm of ms){ if(mm.name==='BollardStripe'){ mm.emissiveIntensity=1.6; } } } });
-    console.log('PROP OK scenery');
-  }catch(e){ console.warn('prop fail scenery',e&&e.message); }
-  // place them
-  function fitH(obj,h){ const b=new THREE.Box3().setFromObject(obj); const s=new THREE.Vector3(); b.getSize(s); const k=h/Math.max(s.y,0.01); obj.scale.setScalar(k); return obj; }
-  function place(obj,x,z,ry,h){ const o=obj.clone(true); if(h) fitH(o,h); o.rotation.y=ry||0; const b=new THREE.Box3().setFromObject(o); o.position.set(x, -b.min.y, z); o.traverse(m=>{if(m.isMesh){m.castShadow=true;}}); scene.add(o); return o; }
-  if(PROPS.planter){ for(const x of [-4.4,0,4.4]) place(PROPS.planter, x, -3.0, Math.PI/2, 0.45); }
-  if(PROPS.shrub){ for(const x of [-4.4,0,4.4]) for(const dz of [-1.4,-0.2,1.0]) place(PROPS.shrub, x+(Math.random()-0.5)*0.25, -3.0+dz, Math.random()*6, 0.5); }
-  if(PROPS.shrub2){ for(const x of [-4.4,0,4.4]) place(PROPS.shrub2, x, -1.6, Math.random()*6, 0.42); }
-  // backdrop green band
-  if(PROPS.shrub2){ for(let i=0;i<10;i++) place(PROPS.shrub2, -18+i*4+Math.random()*2, 12.5, Math.random()*6, 0.7); }
-  if(PROPS.tree){ for(const [x,z,h] of [[-11.5,4.5,3.6],[11.5,4.5,3.2],[-14,0.5,3.0],[14,-2,2.7]]) place(PROPS.tree, x, z, Math.random()*6, h); }
-  if(PROPS.lamp){ for(const x of [-7.5,7.5]) place(PROPS.lamp, x, -9.5, Math.PI, 5.6); for(const x of [-12,12]) place(PROPS.lamp, x, 5.5, 0, 5.6); }
-  if(PROPS.bench){ place(PROPS.bench, -8.6, -7.0, Math.PI/2, 1.15); place(PROPS.bench, 8.6, -7.0, -Math.PI/2, 1.15); }
-  if(PROPS.trashbin){ place(PROPS.trashbin, -7.4, -7.0, 0, 1.1); place(PROPS.trashbin, 7.4, -7.0, 0, 1.1); }
-  if(PROPS.bollard){ for(const x of [-6.6,-2.2,2.2,6.6]) place(PROPS.bollard, x, 7.4, 0, 1.1); for(const x of [-4.4,0,4.4]) place(PROPS.bollard, x, -0.2, 0, 1.0); }
-  if(PROPS.treelow){ for(const [x,z,h] of [[-16,9.5,3.2],[-8,10.5,3.6],[0,11,3.9],[8,10.5,3.4],[16,9.5,3.0]]){ const o=place(PROPS.treelow, x, z, Math.random()*6, h); windSway.push({o, ph:Math.random()*6, amp:0.02}); } }
-  if(PROPS.shrublow){ for(const [x,z] of [[-9.5,-4.0],[9.5,-4.0],[-13,2.0],[13,2.0]]){ const o=place(PROPS.shrublow, x, z, Math.random()*6, 0.55); windSway.push({o, ph:Math.random()*6, amp:0.035}); } }
-}
-
 async function loadAssets(){
   console.log('STAGE chargers');
   const c = await loadGLB('assets/charger.glb'); chargerProto=c.scene; boostEnv(c.scene, 1.8);
@@ -344,7 +288,7 @@ async function loadAssets(){
   console.log('STAGE plugs');
   await loadPlugs();
   console.log('STAGE props');
-  await loadProps();
+  await loadProps({ scene, windSway });
   console.log('STAGE propsdone');
   // Ferrari hero (Draco) — interior, calipers, carbon
   try{
@@ -413,9 +357,14 @@ const clockEl=document.getElementById('clock'), priceEl=document.getElementById(
 
 function toast(msg){ toastEl.innerHTML=msg; toastEl.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>toastEl.classList.remove('show'),2200); }
 
+const windSway=[];   // {o, ph, amp} — gentle canopy breeze, stronger when raining
 // ---- weather system: rain streaks, ripples, lens drops, events ----
 const WEATHER = createWeather({ scene, camera, mirror, ripples, windSway,
   asphalt, wxEl, nightK: ()=>ATMO.nightK, toast });
+
+// ---- quality: presets + auto fps governor ----
+const QUALITY = createQuality({ renderer, scene, Q, WEATHER, mirror,
+  getSSAO: ()=>ssao, applyDaylight, toast });
 
 // ---- economy system: market, solar/buffer, arrivals, day cycle, goals, save ----
 const ECONOMY = createEconomy({ scene, fog, applyDaylight, WORLD, spawnCar,
@@ -483,9 +432,7 @@ function hudSync(now){
 // ---------------- game tick: ordered subsystem update ----------------
 const game = {
   tick(dt, now){
-    // fps governor (auto-quality)
-    fpsAcc+=1/dt; fpsN++; if(fpsN>=30){ fpsVal=fpsAcc/fpsN; fpsAcc=0; fpsN=0; diag.fps=Math.round(fpsVal);
-      if(Q.mode==='auto' && !autoDropped && diag.fps<28){ autoLowT++; if(autoLowT>=3){ autoDropped=true; qApply('low'); toast('\u2699 Auto: LOW (press G to cycle quality)'); } } else if(diag.fps>=45){ autoLowT=0; } }
+    fpsAcc+=1/dt; fpsN++; if(fpsN>=30){ fpsVal=fpsAcc/fpsN; fpsAcc=0; fpsN=0; diag.fps=Math.round(fpsVal); QUALITY.governor(diag.fps); }
     PLAYER.updatePlayer(dt);
     ECONOMY.tick(dt, now);
     COACH.tick();
@@ -555,9 +502,9 @@ composer.insertPass(finalPass, composer.passes.length-1);
 
 // resize
 addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); composer.setSize(innerWidth,innerHeight); if(ssao) ssao.setSize(innerWidth,innerHeight); });
-addEventListener('resize',()=>{ if(Q.mode==='auto') qApply('auto'); });
-qApply(localStorage.getItem(QKEY)||'auto');
-addEventListener('keydown', e=>{ if(e.code==='KeyG'){ const order=['auto','high','med','low']; qApply(order[(order.indexOf(Q.mode)+1)%4]); } });
+addEventListener('resize',()=>{ if(QUALITY.Q.mode==='auto') QUALITY.qApply('auto'); });
+QUALITY.qApply(localStorage.getItem(QUALITY.QKEY)||'auto');
+addEventListener('keydown', e=>{ if(e.code==='KeyG'){ const order=['auto','high','med','low']; QUALITY.qApply(order[(order.indexOf(QUALITY.Q.mode)+1)%4]); } });
 
 // diagnostics for capture harness
 const diag={ fps:0, calls:()=>renderer.info.render.calls, tris:()=>renderer.info.render.triangles };
@@ -617,7 +564,7 @@ window.__GAME = {
   aimCharger(i){ const b=sim.bays[i]; camera.position.set(b.x+1.9, 1.15, -4.3); const look=new THREE.Vector3(b.x,0.95,-6.0); camera.lookAt(look); return 'ok'; },
   hidecars(v){ sim.bays.forEach(b=>{ if(b.car) b.car.visible=!v; }); return 'ok'; },
   onlycharger(i){ scene.traverse(o=>{ if(o.isMesh) o.visible=false; }); sim.bays.forEach((b,j)=>{ if(b.charger){ b.charger.visible=(j===i); b.charger.traverse(o=>{ if(o.isMesh) o.visible=(j===i); }); } if(b.plug) b.plug.visible=(j===i); }); return 'ok'; },
-  qset(m){ qApply(m); return Q.mode; },
+  qset(m){ QUALITY.qApply(m); return QUALITY.Q.mode; },
   solar(){ return {last:+sim.solarLast.toFixed(2), stored:+sim.solarKwh.toFixed(2), capKW:sim.SOLAR_CAP_KW}; },
   // ---- soak-test hooks: drive the REAL interaction path ----
   bayState(i){ const b=sim.bays[i]; return {state:b.state, batt:b.car?+b.car.userData.battery.toFixed(3):null, kwh:+(b.chargeKwh||0).toFixed(3), pat:b.car?+((performance.now()-b.car.userData.arrived)/1000).toFixed(1):null}; },

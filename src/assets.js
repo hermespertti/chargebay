@@ -102,3 +102,44 @@ export function spawnCar(ctx, bay, instant=false, vip=false, seg=null){
   // drive-in animation target
   bay.driveTo = -3.1;
 }
+
+// real foliage & street props (Poly Haven)
+const PROPS = {};
+const windSway=[];   // {o, ph, amp} — gentle canopy breeze, stronger when raining
+
+export async function loadProps(ctx){
+  const { scene, windSway } = ctx;
+  const defs = [
+    ['shrub','assets/shrub_b.glb'],
+    ['shrub2','assets/shrub_a.glb'],
+    ['planter','assets/planter.glb'],
+    ['tree','assets/tree.glb'],
+    ['lamp','assets/lamp.glb'],
+  ];
+  for(const [k,u] of defs){
+    try{ console.log('PROP', k); const g=await loadGLB(u); PROPS[k]=g.scene; boostEnv(PROPS[k],1.4); console.log('PROP OK', k); }catch(e){ console.warn('prop fail',k,e&&e.message); }
+  }
+  // light authored scenery: bench/bin/bollard/low-tree in one small GLB
+  try{ const g=await loadGLB('assets/scenery.glb');
+    for(const o of g.scene.children){ PROPS[o.name.toLowerCase()]=o; }
+    boostEnv(g.scene,1.2);
+    g.scene.traverse(m=>{ if(m.isMesh){ const ms=Array.isArray(m.material)?m.material:[m.material]; for(const mm of ms){ if(mm.name==='BollardStripe'){ mm.emissiveIntensity=1.6; } } } });
+    console.log('PROP OK scenery');
+  }catch(e){ console.warn('prop fail scenery',e&&e.message); }
+  // place them
+  function fitH(obj,h){ const b=new THREE.Box3().setFromObject(obj); const s=new THREE.Vector3(); b.getSize(s); const k=h/Math.max(s.y,0.01); obj.scale.setScalar(k); return obj; }
+  function place(obj,x,z,ry,h){ const o=obj.clone(true); if(h) fitH(o,h); o.rotation.y=ry||0; const b=new THREE.Box3().setFromObject(o); o.position.set(x, -b.min.y, z); o.traverse(m=>{if(m.isMesh){m.castShadow=true;}}); scene.add(o); return o; }
+  if(PROPS.planter){ for(const x of [-4.4,0,4.4]) place(PROPS.planter, x, -3.0, Math.PI/2, 0.45); }
+  if(PROPS.shrub){ for(const x of [-4.4,0,4.4]) for(const dz of [-1.4,-0.2,1.0]) place(PROPS.shrub, x+(Math.random()-0.5)*0.25, -3.0+dz, Math.random()*6, 0.5); }
+  if(PROPS.shrub2){ for(const x of [-4.4,0,4.4]) place(PROPS.shrub2, x, -1.6, Math.random()*6, 0.42); }
+  // backdrop green band
+  if(PROPS.shrub2){ for(let i=0;i<10;i++) place(PROPS.shrub2, -18+i*4+Math.random()*2, 12.5, Math.random()*6, 0.7); }
+  if(PROPS.tree){ for(const [x,z,h] of [[-11.5,4.5,3.6],[11.5,4.5,3.2],[-14,0.5,3.0],[14,-2,2.7]]) place(PROPS.tree, x, z, Math.random()*6, h); }
+  if(PROPS.lamp){ for(const x of [-7.5,7.5]) place(PROPS.lamp, x, -9.5, Math.PI, 5.6); for(const x of [-12,12]) place(PROPS.lamp, x, 5.5, 0, 5.6); }
+  if(PROPS.bench){ place(PROPS.bench, -8.6, -7.0, Math.PI/2, 1.15); place(PROPS.bench, 8.6, -7.0, -Math.PI/2, 1.15); }
+  if(PROPS.trashbin){ place(PROPS.trashbin, -7.4, -7.0, 0, 1.1); place(PROPS.trashbin, 7.4, -7.0, 0, 1.1); }
+  if(PROPS.bollard){ for(const x of [-6.6,-2.2,2.2,6.6]) place(PROPS.bollard, x, 7.4, 0, 1.1); for(const x of [-4.4,0,4.4]) place(PROPS.bollard, x, -0.2, 0, 1.0); }
+  if(PROPS.treelow){ for(const [x,z,h] of [[-16,9.5,3.2],[-8,10.5,3.6],[0,11,3.9],[8,10.5,3.4],[16,9.5,3.0]]){ const o=place(PROPS.treelow, x, z, Math.random()*6, h); windSway.push({o, ph:Math.random()*6, amp:0.02}); } }
+  if(PROPS.shrublow){ for(const [x,z] of [[-9.5,-4.0],[9.5,-4.0],[-13,2.0],[13,2.0]]){ const o=place(PROPS.shrublow, x, z, Math.random()*6, 0.55); windSway.push({o, ph:Math.random()*6, amp:0.035}); } }
+}
+
