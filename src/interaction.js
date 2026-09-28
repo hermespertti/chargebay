@@ -26,6 +26,10 @@ export function createInteraction(ctx){
       if(b.car){
         const port=BAYSYS.bayPort(b);
         if(port.distanceTo(camera.position)<2.2){
+          // icy fumble: heavy snow makes the connector slip, once per 15s max per bay
+          if(sim.snowK>0.5 && (b.fumbleAt===undefined || performance.now()-b.fumbleAt>15000)){
+            if(Math.random()<0.35){ b.fumbleAt=performance.now(); SFX.click(160); toast('❄️ Icy hands — the connector slipped! Try again'); return; }
+          }
           sim.docked=true; b.plugged=true; b.car.userData.docked=true; b.state='ready'; b.chargeStartT=performance.now(); b.chargeKwh=0;
           // GLB ground truth: nozzle tip = local +Y, face-up = local +Z.
           // insert along the car's lateral body normal (through the side port), not toward car center

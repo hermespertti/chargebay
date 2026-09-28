@@ -51,8 +51,8 @@ export function createShop(ctx){
   }
   function unlockBay(b){
     if(!b.locked){ toast('Bay already unlocked'); return; }
-    if(sim.cash<1200){ toast('❌ Need $1200'); return; }
-    sim.cash-=1200; sim.dayCost+=1200; b.locked=false; applyLocked(); SFX.cash(); toast('🟺 Bay '+(BAY_X.indexOf(b.x)+1)+' unlocked');
+    if(sim.cash<900){ toast('❌ Need $900'); return; }
+    sim.cash-=900; sim.dayCost+=1200; b.locked=false; applyLocked(); SFX.cash(); toast('🟺 Bay '+(BAY_X.indexOf(b.x)+1)+' unlocked');
     b.nextArrT = performance.now()+2000+Math.random()*4000;
   }
   function renderTech(){

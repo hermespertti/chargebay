@@ -57,6 +57,10 @@ export function createEconomy(ctx){
       if(b.car&&b.car.userData.vip) bumpGoalFn('vipDone',1);
       if((performance.now()-(b.chargeStartT||performance.now()))<90000 && (b.chargeKwh||0)>25) bumpGoalFn('fast',1);
       if(b.car&&b.car.userData.seg&&b.car.userData.seg.id==='taxi') bumpGoalFn('taxiDone',1);
+      if(b.car&&b.car.userData.seg&&b.car.userData.seg.id==='truck' && sim.convoy && b.car.userData.convoyId===sim.convoy.id){
+        sim.convoy.served=(sim.convoy.served||0)+1;
+        if(sim.convoy.left===0 && sim.convoy.served>=3){ sim.convoy=null; sim.cash+=250; sim.dayRev+=250; repAdd(4); SFX.airhorn(); SFX.chime(660,990); toast('🏁 <b>CONVOY SERVED</b> — all 3 rigs charged · +$250 convoy bonus · rep +4'); bumpGoalFn('convoy',3); }
+      }
       if(b.car&&b.car.userData.polite){ b.sessionRev+=3; sim.cash+=3; bumpGoalFn('polite',1); toast('😊 Happy driver tipped +$3'); }
     }
     b.sessionRev=0; b.sessionCost=0;
@@ -151,11 +155,23 @@ export function createEconomy(ctx){
       for(const b of sim.bays){
         if(b.locked) continue;
         if(b.state==='empty' && b.nextArrT && now>=b.nextArrT){
-          spawnCar(b, false, sim.vipPending && !sim.vipSpawned); if(sim.vipPending) sim.vipSpawned=true;
+          if(sim.convoy && sim.convoy.left>0){
+            const truckSeg=SEGMENTS.find(s=>s.id==='truck');
+            spawnCar(b, false, false, truckSeg);
+            if(b.car) b.car.userData.convoyId=sim.convoy.id;   // stamp: only THIS convoy's rigs count
+            sim.convoy.left--; sim.convoy.arrived=(sim.convoy.arrived||0)+1;
+            toast('🚛 Rig '+(4-sim.convoy.left)+'/3 rolling into bay '+(sim.bays.indexOf(b)+1));
+            if(sim.convoy.left===0) sim.convoy.dueT=performance.now()+8*60*1000; // grace window to serve all
+          } else spawnCar(b, false, sim.vipPending && !sim.vipSpawned);
+          if(sim.vipPending) sim.vipSpawned=true;
           const adsBoost = sim.techOwned.ads?0.75:1;      // ad network: arrivals 25% sooner
           b.nextArrT = now + (12000 - Math.min(8000, sim.spotPrice*40000)) * (0.6+Math.random()*0.8) / repMult() / demandFactor() * adsBoost * (1 + sim.fogK*1.6) * (performance.now()<sim.heatUntil?0.82:1);
         }
       }
+    }
+    // convoy expiry: window closed with unserved rigs
+    if(sim.convoy && ((sim.convoy.left===0 && sim.convoy.dueT && performance.now()>sim.convoy.dueT) || performance.now()>sim.convoy.born+20*60*1000) && (sim.convoy.served||0)<3){
+      toast('🚛 Convoy window closed — only '+(sim.convoy.served||0)+'/3 rigs served'); sim.convoy=null;
     }
     // day rollover at 00:00
     if(sim.gameClock>=24*60){ sim.gameClock-=24*60; endDay(); }

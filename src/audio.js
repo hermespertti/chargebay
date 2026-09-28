@@ -38,6 +38,17 @@ const SFX = (function(){
       c.connect(hp); hp.connect(cG); cG.connect(master); c.start(t0); }
   }
 
+  function airhorn(){ if(!ctx||muted) return; const t0=ctx.currentTime;
+    // two-tone truck horn: low blast then higher blast, slight vibrato
+    [[196,0.55],[262,0.45]].forEach(([f,d],i)=>{ const t=t0+i*0.5;
+      const o=ctx.createOscillator(); o.type='sawtooth'; o.frequency.setValueAtTime(f,t);
+      const lfo=ctx.createOscillator(); lfo.frequency.value=6; const lG=ctx.createGain(); lG.gain.value=3.5;
+      lfo.connect(lG); lG.connect(o.frequency);
+      const bp=ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=f*2; bp.Q.value=1.5;
+      const g=ctx.createGain(); g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.28,t+0.03); g.gain.setValueAtTime(0.28,t+d-0.06); g.gain.exponentialRampToValueAtTime(0.001,t+d);
+      o.connect(bp); bp.connect(g); g.connect(master); o.start(t); o.stop(t+d+0.05); lfo.start(t); lfo.stop(t+d+0.05); });
+  }
+
   function setCharge(active, n){ if(!ctx) return; const g=active? Math.min(0.10, 0.04*n):0; humGain.gain.setTargetAtTime(g, ctx.currentTime, 0.4); humFilter.frequency.setTargetAtTime(active?220:120, ctx.currentTime, 0.5); }
   function click(freq){ if(!ctx||muted) return; const t=ctx.currentTime;
     const o=ctx.createOscillator(); o.type='square'; o.frequency.setValueAtTime(freq||240,t); o.frequency.exponentialRampToValueAtTime((freq||240)*0.4, t+0.05);
@@ -94,7 +105,7 @@ const SFX = (function(){
     const f=ctx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=1100; f.Q.value=6;
     const g=ctx.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(0.018,t+0.05); g.gain.exponentialRampToValueAtTime(0.0005,t+0.25);
     o.connect(f); f.connect(g); g.connect(master); o.start(t); o.stop(t+0.3); }
-  const api={ resume, setRain:setRain2, thunder, setCharge, click, latch, chime, cash, engine, city, rainLFO, departHorn, tire, setTire, wiperSqueak, toggleMute, get muted(){return muted;} };
+  const api={ resume, setRain:setRain2, thunder, airhorn, setCharge, click, latch, chime, cash, engine, city, rainLFO, departHorn, tire, setTire, wiperSqueak, toggleMute, get muted(){return muted;} };
   window.__SFXREF = api;
   return api;
 })();

@@ -22,14 +22,15 @@ const TECH = {
 };
 
 const GOAL_POOL=[
-  { id:'serve', make:d=>({label:'Serve '+(6+d*2)+' customers', target:6+d*2, key:'served', reward:40+d*10}), },
-  { id:'profit', make:d=>({label:'Earn $'+(50+d*20)+' profit', target:50+d*20, key:'profit', reward:50+d*12}), },
-  { id:'nokick', make:d=>({label:'Zero angry customers', target:1, key:'noKick', reward:60}), },
-  { id:'vip', make:d=>({label:'Handle a VIP', target:1, key:'vipDone', reward:45}), },
-  { id:'fast', make:d=>({label:'3 fast charges (<90s)', target:3, key:'fast', reward:55}), },
-  { id:'kwh', make:d=>({label:'Deliver '+(150+d*40)+' kWh', target:150+d*40, key:'kwh', reward:45+d*8}), },
-  { id:'polite', make:d=>({label:'3 happy tipped drivers', target:3, key:'polite', reward:50}), },
-  { id:'taxirush', make:d=>({label:'Serve 4 taxis', target:4, key:'taxiDone', reward:60}), },
+  { id:'serve', make:d=>({label:'Serve '+(5+d*2)+' customers', target:5+d*2, key:'served', reward:55+d*15}), },
+  { id:'profit', make:d=>({label:'Earn $'+(40+d*20)+' profit', target:40+d*20, key:'profit', reward:65+d*15}), },
+  { id:'nokick', make:d=>({label:'Zero angry customers', target:1, key:'noKick', reward:85}), },
+  { id:'vip', make:d=>({label:'Handle a VIP', target:1, key:'vipDone', reward:60}), },
+  { id:'fast', make:d=>({label:'3 fast charges (<90s)', target:3, key:'fast', reward:70}), },
+  { id:'kwh', make:d=>({label:'Deliver '+(120+d*40)+' kWh', target:120+d*40, key:'kwh', reward:60+d*10}), },
+  { id:'polite', make:d=>({label:'3 happy tipped drivers', target:3, key:'polite', reward:65}), },
+  { id:'taxirush', make:d=>({label:'Serve 4 taxis', target:4, key:'taxiDone', reward:75}), },
+  { id:'convoy', make:d=>({label:'Serve a convoy (3 rigs)', target:3, key:'convoy', reward:150, bonus:100}), },
 ];
 
 export { PACK_KWH, TIERS, SEGMENTS, TECH, GOAL_POOL };

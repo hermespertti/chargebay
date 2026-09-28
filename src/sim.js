@@ -15,6 +15,8 @@ export const sim = {
   vipPending: false, vipSpawned: false, nextWx: 0,
   fogUntil: 0, fogK: 0,          // fog bank: density ramp + arrival suppression
   heatUntil: 0,                  // heatwave: grid price spike + solar boost
+  snowUntil: 0, snowK: 0,          // snowfall: particles + icy fumbles + slow drift
+  convoy: null, convoySeq: 0,  // {id,left,served,born,dueT} rigs still to arrive/serve
   // money
   cash: 500, day: 1, dayRev: 0, dayCost: 0, servedTotal: 0,
   revenue: 0, served: 0,

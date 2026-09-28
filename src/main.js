@@ -505,6 +505,7 @@ addEventListener('keydown', e=>{ if(e.code==='KeyG'){ const order=['auto','high'
 const diag={ fps:0, calls:()=>renderer.info.render.calls, tris:()=>renderer.info.render.triangles };
 window.__GAME = {
   diag, bays:()=>sim.bays.map(b=>({state:b.state, batt:b.car?b.car.userData.battery:null, vip:b.car?!!b.car.userData.vip:false})),
+  simRef:sim, clearBay(i){ const b=sim.bays[i]; if(b.car){ scene.remove(b.car); b.car=null; } if(b.cshadow) b.cshadow.visible=false; b.state='empty'; b.plugged=false; return b.state; },
   carMats(){ const out=[]; const car=carProtos[0]; if(!car) return out; const seen=new Set(); car.traverse(o=>{ if(o.isMesh&&o.material){ const ms=Array.isArray(o.material)?o.material:[o.material]; for(const m of ms){ if(seen.has(m.uuid))continue; seen.add(m.uuid); out.push({name:m.name,metal:m.metalness,rough:m.roughness,env:m.envMapIntensity,cc:m.clearcoat!==undefined?m.clearcoat:null,color:m.color?m.color.getHexString():null}); } } }); return out; },
   ready:()=>sim.ready, envReady:()=>ATMO.envReady,
   carBoxes(){ const out=[]; for(const b of sim.bays){ if(b.car){ const bb=new THREE.Box3().setFromObject(b.car); out.push({bay:b.x, state:b.state, min:bb.min.toArray().map(v=>+v.toFixed(2)), max:bb.max.toArray().map(v=>+v.toFixed(2))}); } } return out; },
@@ -514,7 +515,7 @@ window.__GAME = {
   serve(){ sim.served+=1; },
   setClock(h){ sim.gameClock=h*60; },
   weather(v){ sim.raining=Math.max(0,Math.min(1,v)); },
-  wx(){ return {raining:+sim.raining.toFixed(2), cold: performance.now()<sim.coldUntil, brown: performance.now()<sim.brownUntil, cap: sim.brownCap, vipPending: sim.vipPending, fogK:+sim.fogK.toFixed(2), heat: performance.now()<sim.heatUntil}; },
+  wx(){ return {raining:+sim.raining.toFixed(2), cold: performance.now()<sim.coldUntil, brown: performance.now()<sim.brownUntil, cap: sim.brownCap, vipPending: sim.vipPending, fogK:+sim.fogK.toFixed(2), heat: performance.now()<sim.heatUntil, snowK:+sim.snowK.toFixed(2), convoy: sim.convoy? {id:sim.convoy.id,left:sim.convoy.left, served:sim.convoy.served||0}:null}; },
   rollGoals(){ ECONOMY.rollGoals(); return sim.goals.map(g=>g.id); },
   event(name){ const t=performance.now();
     if(name==='cold'){ sim.coldUntil=t+60000; return 'cold'; }
@@ -522,10 +523,13 @@ window.__GAME = {
     if(name==='vip'){ sim.vipPending=true; sim.vipSpawned=false; return 'vip'; }
     if(name==='rain'){ sim.raining=0.8; return 'rain'; }
     if(name==='fog'){ sim.fogUntil=t+60000; return 'fog'; }
-    if(name==='heat'){ sim.heatUntil=t+60000; return 'heat'; } return 'none'; },
+    if(name==='heat'){ sim.heatUntil=t+60000; return 'heat'; }
+    if(name==='snow'){ sim.snowUntil=t+90000; return 'snow'; }
+    if(name==='convoy'){ if(sim.convoy) return 'active'; sim.convoy={left:3,served:0,id:++sim.convoySeq,born:performance.now()}; SFX.airhorn(); return 'convoy'; } return 'none'; },
   forceArr(i,vip){ const b=sim.bays[i]; if(b.state!=='empty') return 'busy'; spawnCar(b,false,!!vip); return 'ok'; },
   info(){ return {nightK:+ATMO.nightK.toFixed(3), clock:Math.floor(sim.gameClock), protos:carProtos.length, fixtures:nightFixtures.length}; },
   camPos(){ return {x:+camera.position.x.toFixed(2), y:+camera.position.y.toFixed(2), z:+camera.position.z.toFixed(2)}; },
+  camSet(x,y,z,lx,ly,lz){ camera.position.set(x,y,z); camera.lookAt(lx,ly,lz); return 'ok'; },
   setBatt(i,v){ if(sim.bays[i].car){ sim.bays[i].car.userData.battery=v; return 'ok'; } return 'nocar'; },
   q(){ return {mode:Q.mode, fps:diag.fps, pxr:renderer.getPixelRatio?+renderer.getPixelRatio().toFixed(2):null}; },
   techState(){ return Object.assign({}, sim.techOwned); },
